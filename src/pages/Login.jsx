@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 
-export default function Register() {
+export default function Login() {
   const navigate = useNavigate()
-  const [form, setForm] = useState({ fullname: '', mobile: '', dob: '', gender: '', email: '', role: 'member' })
-  const [hints, setHints] = useState({})
+  const [mobile, setMobile] = useState('')
+  const [dob, setDob] = useState({ day: '', month: '', year: '' })
+  const [role, setRole] = useState('member')
   const [loading, setLoading] = useState(false)
   const [toast, setToast] = useState(null)
 
@@ -14,77 +15,59 @@ export default function Register() {
     setTimeout(() => setToast(null), 3000)
   }
 
-  const validate = (field, value) => {
-    switch (field) {
-      case 'fullname':
-        return /^[a-zA-Z\s]{2,}$/.test(value) ? { text: '✓ Looks good', cls: 'ok' } : { text: '✗ Letters only', cls: 'err' }
-      case 'mobile':
-        return /^[6-9]\d{9}$/.test(value) ? { text: '✓ Valid number', cls: 'ok' } : { text: value.length < 10 ? `${10 - value.length} more digits` : '✗ Must start with 6-9', cls: 'err' }
-      case 'dob': {
-        const age = Math.floor((new Date() - new Date(value)) / (365.25 * 24 * 60 * 60 * 1000))
-        return age >= 16 && age <= 80 ? { text: `✓ Age: ${age} years`, cls: 'ok' } : { text: '✗ Must be 16+', cls: 'err' }
-      }
-      case 'email':
-        return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value) ? { text: '✓ Valid email', cls: 'ok' } : { text: '✗ Enter valid email', cls: 'err' }
-      default: return null
-    }
-  }
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const currentYear = new Date().getFullYear()
+  const years = Array.from({ length: 60 }, (_, i) => currentYear - 16 - i)
+  const days = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'))
 
-  const handleChange = (field, value) => {
-    // Mobile: numbers only
-    if (field === 'mobile') value = value.replace(/\D/g, '').slice(0, 10)
-    setForm(f => ({ ...f, [field]: value }))
-    const h = validate(field, value)
-    if (h) setHints(prev => ({ ...prev, [field]: h }))
-  }
+  const handleLogin = async () => {
+    if (!/^[6-9]\d{9}$/.test(mobile)) { showToast('⚠ Enter a valid 10-digit mobile number', 'error'); return }
+    if (!dob.day || !dob.month || !dob.year) { showToast('⚠ Please select your full date of birth', 'error'); return }
 
-  const handleSubmit = async () => {
-    // Check all valid
-    const fields = ['fullname', 'mobile', 'dob', 'email']
-    for (const f of fields) {
-      const h = validate(f, form[f])
-      if (!h || h.cls !== 'ok') { showToast('⚠ Please fix all fields first', 'error'); return }
-    }
-    if (!form.gender) { showToast('⚠ Please select your gender', 'error'); return }
+   const dobString = `${dob.year}-${String(dob.month).padStart(2,'0')}-${String(dob.day).padStart(2,'0')}`
 
     setLoading(true)
     try {
-      // Check for duplicate mobile
-      const { data: existing } = await supabase
+      const { data, error } = await supabase
         .from('members')
-        .select('id')
-        .eq('mobile', form.mobile)
+        .select('*')
+        .eq('mobile', mobile)
+        .eq('dob', dobString)
+        .eq('role', role)
         .single()
 
-      if (existing) {
-        showToast('⚠ This mobile number is already registered!', 'error')
+      if (error || !data) {
+        showToast('✗ No account found. Check your number or date of birth.', 'error')
         setLoading(false)
         return
       }
 
-      // Insert new member
-      const { error } = await supabase.from('members').insert([{
-        full_name: form.fullname,
-        mobile: form.mobile,
-        dob: form.dob,
-        gender: form.gender,
-        email: form.email,
-        role: form.role,
-        created_at: new Date().toISOString()
-      }])
+      // Store member in sessionStorage
+      sessionStorage.setItem('baby_member', JSON.stringify(data))
+      showToast(`✅ Welcome back ${data.full_name.split(' ')[0]}!`, 'success')
 
-      if (error) throw error
+      setTimeout(() => {
+        navigate(role === 'coach' ? '/coach' : '/member')
+      }, 1500)
 
-      showToast('✅ Welcome to BABY! Please sign in.', 'success')
-      setTimeout(() => navigate('/login'), 2000)
-    } catch (err) {
+    } catch {
       showToast('Something went wrong. Try again.', 'error')
     }
     setLoading(false)
   }
 
+  const selectStyle = {
+    background: 'rgba(255,255,255,0.05)',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: 12, padding: '13px 8px',
+    color: '#fff', fontSize: 14,
+    outline: 'none', width: '100%',
+    WebkitAppearance: 'none', textAlign: 'center',
+    colorScheme: 'dark'
+  }
+
   return (
-    <div className="screen" style={{ padding: '36px 24px 32px' }}>
+    <div className="screen" style={{ padding: '40px 24px 32px' }}>
       <div className="grid-bg" />
       <div style={{ position: 'relative', zIndex: 2 }}>
 
@@ -96,22 +79,27 @@ export default function Register() {
           <span style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 22, color: '#fff', letterSpacing: 4 }}>BABY</span>
         </div>
 
-        <h1 style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 38, color: '#fff', letterSpacing: 3, lineHeight: 1 }}>JOIN THE CREW</h1>
-        <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.35)', marginTop: 4, marginBottom: 24 }}>One account. One number. No duplicates.</p>
+        <h1 style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 42, color: '#fff', letterSpacing: 3, lineHeight: 1 }}>WELCOME BACK</h1>
+        <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.35)', marginTop: 6, marginBottom: 24 }}>Sign in with your mobile + date of birth</p>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-          {/* Full Name */}
-          <div className="field">
-            <label>Full Name</label>
-            <input
-              type="text"
-              placeholder="e.g. Ruchi Kumar"
-              value={form.fullname}
-              className={hints.fullname?.cls === 'ok' ? 'valid' : hints.fullname?.cls === 'err' ? 'error' : ''}
-              onChange={e => handleChange('fullname', e.target.value)}
-            />
-            {hints.fullname && <span className={`hint ${hints.fullname.cls}`}>{hints.fullname.text}</span>}
+          {/* Role */}
+          <div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 500, marginBottom: 8 }}>Signing in as</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {['member', 'coach'].map(r => (
+                <div key={r} onClick={() => setRole(r)}
+                  style={{
+                    border: `1px solid ${role === r ? 'rgba(255,100,0,0.6)' : 'rgba(255,255,255,0.08)'}`,
+                    background: role === r ? 'rgba(255,100,0,0.08)' : 'transparent',
+                    borderRadius: 12, padding: '12px 8px', textAlign: 'center', cursor: 'pointer'
+                  }}>
+                  <div style={{ fontSize: 18, marginBottom: 4 }}>{r === 'member' ? '🏋️' : '📋'}</div>
+                  <div style={{ fontSize: 12, color: role === r ? '#fff' : 'rgba(255,255,255,0.4)', fontWeight: 500, textTransform: 'capitalize' }}>{r}</div>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Mobile */}
@@ -119,74 +107,50 @@ export default function Register() {
             <label>Mobile Number</label>
             <input
               type="tel"
-              placeholder="10-digit mobile number"
-              value={form.mobile}
-              className={hints.mobile?.cls === 'ok' ? 'valid' : hints.mobile?.cls === 'err' ? 'error' : ''}
-              onChange={e => handleChange('mobile', e.target.value)}
+              placeholder="Your registered mobile"
+              value={mobile}
+              maxLength={10}
+              onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
             />
-            {hints.mobile && <span className={`hint ${hints.mobile.cls}`}>{hints.mobile.text}</span>}
           </div>
 
-          {/* DOB + Gender */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div className="field">
-              <label>Date of Birth</label>
-              <input
-                type="date"
-                value={form.dob}
-                style={{ colorScheme: 'dark' }}
-                className={hints.dob?.cls === 'ok' ? 'valid' : hints.dob?.cls === 'err' ? 'error' : ''}
-                onChange={e => handleChange('dob', e.target.value)}
-              />
-              {hints.dob && <span className={`hint ${hints.dob.cls}`}>{hints.dob.text}</span>}
-            </div>
-            <div className="field">
-              <label>Gender</label>
-              <select value={form.gender} onChange={e => setForm(f => ({ ...f, gender: e.target.value }))}
-                style={{ colorScheme: 'dark' }}>
-                <option value="">Select</option>
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-                <option value="other">Other</option>
+          {/* DOB */}
+          <div className="field">
+            <label>Date of Birth</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+              <select style={selectStyle} value={dob.day} onChange={e => setDob(d => ({ ...d, day: e.target.value }))}>
+                <option value="">DD</option>
+                {days.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+              <select style={selectStyle} value={dob.month} onChange={e => setDob(d => ({ ...d, month: e.target.value }))}>
+                <option value="">MM</option>
+                {months.map((m, i) => <option key={m} value={String(i + 1).padStart(2, '0')}>{m}</option>)}
+              </select>
+              <select style={selectStyle} value={dob.year} onChange={e => setDob(d => ({ ...d, year: e.target.value }))}>
+                <option value="">YYYY</option>
+                {years.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
           </div>
 
-          {/* Email */}
-          <div className="field">
-            <label>Email ID</label>
-            <input
-              type="email"
-              placeholder="e.g. ruchi@gmail.com"
-              value={form.email}
-              className={hints.email?.cls === 'ok' ? 'valid' : hints.email?.cls === 'err' ? 'error' : ''}
-              onChange={e => handleChange('email', e.target.value)}
-            />
-            {hints.email && <span className={`hint ${hints.email.cls}`}>{hints.email.text}</span>}
-          </div>
+          <p style={{ textAlign: 'right', fontSize: 12, color: 'rgba(255,100,0,0.6)', cursor: 'pointer' }}
+            onClick={() => showToast('📲 Message Coach Sam on WhatsApp to recover your account', 'info')}>
+            Forgot details? Contact Coach Sam
+          </p>
 
-          {/* Role */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            {['member', 'coach'].map(r => (
-              <div key={r} onClick={() => setForm(f => ({ ...f, role: r }))}
-                style={{
-                  border: `1px solid ${form.role === r ? 'rgba(255,100,0,0.6)' : 'rgba(255,255,255,0.08)'}`,
-                  background: form.role === r ? 'rgba(255,100,0,0.08)' : 'transparent',
-                  borderRadius: 12, padding: '12px 8px', textAlign: 'center', cursor: 'pointer'
-                }}>
-                <div style={{ fontSize: 20, marginBottom: 4 }}>{r === 'member' ? '🏋️' : '📋'}</div>
-                <div style={{ fontSize: 13, color: form.role === r ? '#fff' : 'rgba(255,255,255,0.4)', fontWeight: 500, textTransform: 'capitalize' }}>{r}</div>
-              </div>
-            ))}
-          </div>
-
-          <button className="btn-primary" onClick={handleSubmit} disabled={loading} style={{ marginTop: 4 }}>
-            {loading ? 'Creating Account...' : 'Create My BABY Account'}
+          <button className="btn-primary" onClick={handleLogin} disabled={loading}>
+            {loading ? 'Signing In...' : 'Sign In to BABY'}
           </button>
 
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.07)' }} />
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>new here?</span>
+            <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.07)' }} />
+          </div>
+
           <p style={{ textAlign: 'center', fontSize: 13, color: 'rgba(255,255,255,0.3)' }}>
-            Already a member?{' '}
-            <span style={{ color: '#ff6400', cursor: 'pointer', fontWeight: 500 }} onClick={() => navigate('/login')}>Sign In ↗</span>
+            Don't have an account?{' '}
+            <span style={{ color: '#ff6400', cursor: 'pointer', fontWeight: 500 }} onClick={() => navigate('/register')}>Join BABY ↗</span>
           </p>
         </div>
       </div>
