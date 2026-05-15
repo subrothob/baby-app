@@ -89,11 +89,11 @@ export default function MemberHome() {
    const { error } = await supabase.from('workout_logs').insert([{
   member_id: member.id,
   member_name: member.full_name,
-  logged_at: new Date().toISOString().split('T')[0],
-  notes: 'Check-in'
+  logged_at: new Date().toISOString().split('T')[0]
 }])
-    if (!error) {
-      setCheckedIn(true)
+    console.log('checkin error:', error)
+if (!error) {
+  setCheckedIn(true)
       showToast('🔥 Checked in! Let\'s get it!', 'success')
       fetchLeaderboard()
     } else {
