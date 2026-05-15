@@ -90,6 +90,7 @@ export default function MemberHome() {
   member_id: member.id,
   member_name: member.full_name,
   wod_name: 'Check-in',
+  workout_type: 'Check-in',
   logged_at: new Date().toISOString().split('T')[0]
 }])
     console.log('checkin error:', error)
