@@ -89,6 +89,7 @@ export default function MemberHome() {
    const { error } = await supabase.from('workout_logs').insert([{
   member_id: member.id,
   member_name: member.full_name,
+  wod_name: 'Check-in',
   logged_at: new Date().toISOString().split('T')[0]
 }])
     console.log('checkin error:', error)
