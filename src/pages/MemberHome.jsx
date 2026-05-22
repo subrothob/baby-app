@@ -16,7 +16,7 @@ const MOVEMENTS = {
   '⏱️ Benchmark WODs': ['Fran','Grace','Helen','Annie','Isabel','Karen','Nancy','Cindy','Murph','DT']
 }
 
-function MiniLineChart({ data, color = accent, unit = '' }) {
+function MiniLineChart({ data, color = accent }) {
   const canvasRef = useRef(null)
   useEffect(() => {
     const canvas = canvasRef.current
@@ -28,9 +28,8 @@ function MiniLineChart({ data, color = accent, unit = '' }) {
     const min = Math.min(...vals), max = Math.max(...vals)
     const range = max - min || 1
     ctx.clearRect(0, 0, w, h)
-    // gradient fill
     const grad = ctx.createLinearGradient(0, 0, 0, h)
-    grad.addColorStop(0, color.replace(')', ',0.3)').replace('rgb', 'rgba'))
+    grad.addColorStop(0, color + '55')
     grad.addColorStop(1, 'transparent')
     ctx.beginPath()
     data.forEach((d, i) => {
@@ -43,7 +42,6 @@ function MiniLineChart({ data, color = accent, unit = '' }) {
     ctx.closePath()
     ctx.fillStyle = grad
     ctx.fill()
-    // line
     ctx.beginPath()
     data.forEach((d, i) => {
       const x = pad + (i / (data.length - 1)) * (w - pad * 2)
@@ -53,7 +51,6 @@ function MiniLineChart({ data, color = accent, unit = '' }) {
     ctx.strokeStyle = color
     ctx.lineWidth = 2
     ctx.stroke()
-    // dots
     data.forEach((d, i) => {
       const x = pad + (i / (data.length - 1)) * (w - pad * 2)
       const y = h - pad - ((parseFloat(d.value_numeric || d.value) - min) / range) * (h - pad * 2)
@@ -75,20 +72,18 @@ export default function MemberHome() {
   const [leaderboard, setLeaderboard] = useState([])
   const [checkedIn, setCheckedIn] = useState(false)
   const [checkingIn, setCheckingIn] = useState(false)
+  const [scoredToday, setScoredToday] = useState(false)
   const [tab, setTab] = useState('home')
   const [toast, setToast] = useState(null)
 
-  // WOD Score logging
   const [showScoreForm, setShowScoreForm] = useState(false)
   const [scoreForm, setScoreForm] = useState({ rounds: '', time_minutes: '', time_seconds: '', weight_kg: '', reps: '', notes: '' })
   const [savingScore, setSavingScore] = useState(false)
 
-  // PB logging
   const [showPBForm, setShowPBForm] = useState(false)
   const [pbForm, setPbForm] = useState({ movement: '', custom_movement: '', pb_type: 'Weight', value: '' })
   const [savingPB, setSavingPB] = useState(false)
 
-  // Progress tab
   const [progressMovement, setProgressMovement] = useState('')
   const [customProgress, setCustomProgress] = useState('')
   const [progressData, setProgressData] = useState([])
@@ -110,6 +105,7 @@ export default function MemberHome() {
     fetchPbs(m.id)
     fetchLeaderboard()
     checkTodayAttendance(m.id)
+    checkTodayScore(m.id)
   }, [])
 
   const fetchWod = async () => {
@@ -144,9 +140,20 @@ export default function MemberHome() {
 
   const checkTodayAttendance = async (memberId) => {
     const today = new Date().toISOString().split('T')[0]
-    const { data } = await supabase.from('workout_logs').select('id').eq('member_id', memberId).eq('logged_at', today).limit(1)
+    const { data } = await supabase.from('workout_logs').select('id')
+      .eq('member_id', memberId).eq('logged_at', today).limit(1)
     if (data && data.length > 0) setCheckedIn(true)
   }
+
+  const checkTodayScore = async (memberId) => {
+  const today = new Date().toISOString().split('T')[0]
+  const { data } = await supabase.from('workout_logs').select('id')
+    .eq('member_id', memberId)
+    .eq('logged_at', today)
+    .not('wod_name', 'eq', 'Check-in')
+    .limit(1)
+  if (data && data.length > 0) setScoredToday(true)
+}
 
   const handleCheckIn = async () => {
     if (checkedIn || !member) return
@@ -161,8 +168,16 @@ export default function MemberHome() {
     setCheckingIn(false)
   }
 
-  const handleLogScore = async () => {
-    if (!member || !wod) return
+const handleLogScore = async () => {
+  if (!member || !wod) return
+  const hasScore = scoreForm.rounds || scoreForm.time_minutes || 
+                   scoreForm.weight_kg || scoreForm.reps
+  if (!hasScore) { 
+    showToast('⚠ Enter at least one score field', 'error')
+    return 
+  }
+  setSavingScore(true)
+  // ... rest stays the same
     setSavingScore(true)
     const totalSecs = (parseInt(scoreForm.time_minutes || 0) * 60) + parseInt(scoreForm.time_seconds || 0)
     const { error } = await supabase.from('workout_logs').insert([{
@@ -178,6 +193,7 @@ export default function MemberHome() {
     if (!error) {
       showToast('💪 Score logged!', 'success')
       setShowScoreForm(false)
+      setScoredToday(true)
       setScoreForm({ rounds: '', time_minutes: '', time_seconds: '', weight_kg: '', reps: '', notes: '' })
     } else showToast('Something went wrong.', 'error')
     setSavingScore(false)
@@ -189,6 +205,14 @@ export default function MemberHome() {
     if (!movement || !pbForm.value) { showToast('⚠ Fill in movement and value', 'error'); return }
     setSavingPB(true)
     const numVal = parseFloat(pbForm.value)
+    // Save to pb_history for graph tracking
+    await supabase.from('pb_history').insert([{
+      member_id: member.id, member_name: member.full_name,
+      movement, pb_type: pbForm.pb_type,
+      value: pbForm.value, value_numeric: numVal || null,
+      achieved_at: new Date().toISOString().split('T')[0]
+    }])
+    // Upsert current best
     const { error } = await supabase.from('personal_bests').upsert([{
       member_id: member.id, member_name: member.full_name,
       movement, pb_type: pbForm.pb_type,
@@ -208,9 +232,10 @@ export default function MemberHome() {
   const fetchProgress = async (movementName) => {
     if (!member || !movementName) return
     setLoadingProgress(true)
-    // PB history — since upsert overwrites, we use workout_logs for history
-    const { data: pbData } = await supabase.from('personal_bests').select('*')
+    // Use pb_history for graph (multiple entries over time)
+    const { data: pbData } = await supabase.from('pb_history').select('*')
       .eq('member_id', member.id).eq('movement', movementName)
+      .order('achieved_at', { ascending: true })
     if (pbData) setProgressData(pbData)
     // WOD score history
     const { data: scoreData } = await supabase.from('workout_logs').select('*')
@@ -248,7 +273,6 @@ export default function MemberHome() {
     <div style={{ background: '#0a0a0a', minHeight: '100vh', color: '#fff', fontFamily: "'DM Sans', sans-serif", paddingBottom: 80, maxWidth: 480, margin: '0 auto', position: 'relative' }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
 
-      {/* Header */}
       <div style={{ padding: '48px 20px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 2 }}>{today}</div>
@@ -259,10 +283,8 @@ export default function MemberHome() {
 
       <div style={{ padding: '0 20px' }}>
 
-        {/* ── HOME TAB ── */}
         {tab === 'home' && (
           <>
-            {/* Check In */}
             <div style={{ ...card, marginBottom: 14, background: checkedIn ? 'rgba(0,200,100,0.08)' : accentDim, border: `1px solid ${checkedIn ? 'rgba(0,200,100,0.25)' : 'rgba(255,100,0,0.3)'}` }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div>
@@ -277,7 +299,6 @@ export default function MemberHome() {
               </div>
             </div>
 
-            {/* WOD Preview */}
             <div style={{ ...card, marginBottom: 14 }}>
               <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 10 }}>Today's WOD</div>
               {wod ? (
@@ -292,7 +313,6 @@ export default function MemberHome() {
               ) : <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14 }}>No WOD posted yet. Check back soon! 💤</div>}
             </div>
 
-            {/* Quick PBs */}
             <div style={{ ...card, marginBottom: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600 }}>My Personal Bests</div>
@@ -303,14 +323,13 @@ export default function MemberHome() {
                   {pbs.slice(0, 4).map((pb, i) => (
                     <div key={i} style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: '10px 12px' }}>
                       <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 2 }}>{pb.movement}</div>
-                      <div style={{ fontSize: 16, fontWeight: 600 }}>{pb.value}<span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginLeft: 2 }}>{pb.pb_type === 'Weight' ? 'kg' : pb.pb_type === 'Time' ? 's' : ''}</span></div>
+                      <div style={{ fontSize: 16, fontWeight: 600 }}>{pb.value}<span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginLeft: 2 }}>{pb.pb_type === 'Weight' ? 'kg' : ''}</span></div>
                     </div>
                   ))}
                 </div>
               ) : <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 13 }}>No PBs logged yet. Start tracking! 🏋️</div>}
             </div>
 
-            {/* Mini Leaderboard */}
             <div style={{ ...card }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600 }}>This Week's Leaders</div>
@@ -328,7 +347,6 @@ export default function MemberHome() {
           </>
         )}
 
-        {/* ── WOD TAB ── */}
         {tab === 'wod' && (
           <>
             <div style={{ ...card, marginBottom: 14 }}>
@@ -346,18 +364,29 @@ export default function MemberHome() {
                         <div style={{ fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{s.val}</div>
                       </div>
                     ))}
-                  <button onClick={() => setShowScoreForm(!showScoreForm)}
-                    style={{ width: '100%', background: accent, border: 'none', borderRadius: 12, padding: '14px', color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'", marginTop: 8 }}>
-                    {showScoreForm ? '✕ Cancel' : '📝 Log My Score'}
-                  </button>
+                  {scoredToday ? (
+                    <div style={{ textAlign: 'center', padding: '14px', color: 'rgba(0,200,100,0.9)', fontWeight: 600, fontSize: 15, background: 'rgba(0,200,100,0.08)', borderRadius: 12, marginTop: 8 }}>
+                      ✅ Score logged today! Great work 💪
+                    </div>
+                  ) : (
+                    <button onClick={() => setShowScoreForm(!showScoreForm)}
+                      style={{ width: '100%', background: accent, border: 'none', borderRadius: 12, padding: '14px', color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'", marginTop: 8 }}>
+                      {showScoreForm ? '✕ Cancel' : '📝 Log My Score'}
+                    </button>
+                  )}
                 </>
               ) : <div style={{ color: 'rgba(255,255,255,0.3)', textAlign: 'center', padding: '40px 0' }}>No WOD posted yet 💤</div>}
             </div>
 
-            {/* Score Form */}
-            {showScoreForm && wod && (
+            {showScoreForm && wod && !scoredToday && (
               <div style={{ ...card, marginBottom: 14 }}>
-                <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 14 }}>Log Your Score</div>
+                <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 4 }}>Log Your Score</div>
+<div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 14 }}>
+  {wod.type === 'For Time' ? '⏱ Enter your finishing time' :
+   wod.type === 'AMRAP' ? '🔁 Enter rounds + reps completed' :
+   wod.type === 'Strength' || wod.type === 'EMOM' ? '💪 Enter weight lifted' :
+   'Fill in what applies to your workout'}
+</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <div>
@@ -394,12 +423,9 @@ export default function MemberHome() {
           </>
         )}
 
-        {/* ── PROGRESS TAB ── */}
         {tab === 'progress' && (
           <div>
             <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 14 }}>Progress Tracker 📈</div>
-
-            {/* Category selector */}
             <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 12, scrollbarWidth: 'none' }}>
               {Object.keys(MOVEMENTS).map(cat => (
                 <button key={cat} onClick={() => setProgressCategory(cat)}
@@ -408,8 +434,6 @@ export default function MemberHome() {
                 </button>
               ))}
             </div>
-
-            {/* Movement selector */}
             <div style={{ ...card, marginBottom: 14 }}>
               <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 10 }}>Select Movement</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
@@ -429,14 +453,12 @@ export default function MemberHome() {
               </div>
             </div>
 
-            {/* Progress Charts */}
             {progressMovement && (
               <>
                 {loadingProgress ? (
                   <div style={{ textAlign: 'center', padding: '40px 0', color: 'rgba(255,255,255,0.3)' }}>Loading...</div>
                 ) : (
                   <>
-                    {/* PB Chart */}
                     <div style={{ ...card, marginBottom: 14 }}>
                       <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 4 }}>Personal Best — {progressMovement}</div>
                       <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginBottom: 12 }}>Weight / Value over time</div>
@@ -465,7 +487,6 @@ export default function MemberHome() {
                       )}
                     </div>
 
-                    {/* WOD Score History Chart */}
                     <div style={{ ...card, marginBottom: 14 }}>
                       <div style={{ fontSize: 11, color: '#00c8ff', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 4 }}>WOD Score History</div>
                       <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginBottom: 12 }}>Rounds/Reps logged over time</div>
@@ -495,7 +516,6 @@ export default function MemberHome() {
                 )}
               </>
             )}
-
             {!progressMovement && (
               <div style={{ ...card, textAlign: 'center', padding: '40px 20px', color: 'rgba(255,255,255,0.3)' }}>
                 <div style={{ fontSize: 40, marginBottom: 10 }}>📈</div>
@@ -505,7 +525,6 @@ export default function MemberHome() {
           </div>
         )}
 
-        {/* ── MY PBs TAB ── */}
         {tab === 'pbs' && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
@@ -516,12 +535,10 @@ export default function MemberHome() {
               </button>
             </div>
 
-            {/* PB Form */}
             {showPBForm && (
               <div style={{ ...card, marginBottom: 14 }}>
                 <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 14 }}>Log Personal Best</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {/* Movement category */}
                   <div>
                     <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>Category</div>
                     <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
@@ -533,7 +550,6 @@ export default function MemberHome() {
                       ))}
                     </div>
                   </div>
-                  {/* Movement */}
                   <div>
                     <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>Movement</div>
                     <select style={{ ...inputStyle }} value={pbForm.movement} onChange={e => setPbForm(f => ({ ...f, movement: e.target.value }))}>
@@ -545,7 +561,6 @@ export default function MemberHome() {
                   {pbForm.movement === 'custom' && (
                     <input style={inputStyle} placeholder="Type movement name..." value={pbForm.custom_movement} onChange={e => setPbForm(f => ({ ...f, custom_movement: e.target.value }))} />
                   )}
-                  {/* Type */}
                   <div>
                     <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>Type</div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
@@ -557,10 +572,9 @@ export default function MemberHome() {
                       ))}
                     </div>
                   </div>
-                  {/* Value */}
                   <div>
                     <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>
-                      {pbForm.pb_type === 'Weight' ? 'Weight (kg)' : pbForm.pb_type === 'Reps' ? 'Reps' : 'Time (e.g. 4:32 or 23:15)'}
+                      {pbForm.pb_type === 'Weight' ? 'Weight (kg)' : pbForm.pb_type === 'Reps' ? 'Reps' : 'Time (e.g. 4:32)'}
                     </div>
                     <input style={inputStyle} type={pbForm.pb_type === 'Time' ? 'text' : 'number'}
                       placeholder={pbForm.pb_type === 'Weight' ? 'e.g. 80' : pbForm.pb_type === 'Reps' ? 'e.g. 25' : 'e.g. 4:32'}
@@ -574,7 +588,6 @@ export default function MemberHome() {
               </div>
             )}
 
-            {/* PB List */}
             {pbs.length > 0 ? pbs.map((pb, i) => (
               <div key={i} style={{ ...card, display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                 <div>
@@ -597,7 +610,6 @@ export default function MemberHome() {
           </div>
         )}
 
-        {/* ── LEADERBOARD TAB ── */}
         {tab === 'board' && (
           <div>
             <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>This Week's Leaderboard</div>
@@ -622,7 +634,6 @@ export default function MemberHome() {
         )}
       </div>
 
-      {/* Bottom Nav */}
       <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 480, background: 'rgba(10,10,10,0.95)', borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', backdropFilter: 'blur(20px)' }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, background: 'none', border: 'none', padding: '12px 0 16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
