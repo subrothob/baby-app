@@ -16,6 +16,15 @@ const MOVEMENTS = {
   '⏱️ Benchmark WODs': ['Fran','Grace','Helen','Annie','Isabel','Karen','Nancy','Cindy','Murph','DT']
 }
 
+
+// VAPID helper
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const rawData = window.atob(base64)
+  return Uint8Array.from([...rawData].map(char => char.charCodeAt(0)))
+}
+
 function MiniLineChart({ data, color = accent }) {
   const canvasRef = useRef(null)
   useEffect(() => {
@@ -74,6 +83,7 @@ export default function MemberHome() {
   const [checkingIn, setCheckingIn] = useState(false)
   const [scoredToday, setScoredToday] = useState(false)
   const [tab, setTab] = useState('home')
+  const [notifStatus, setNotifStatus] = useState('idle')
   const [toast, setToast] = useState(null)
 
   const [showScoreForm, setShowScoreForm] = useState(false)
@@ -90,6 +100,16 @@ export default function MemberHome() {
   const [wodScoreHistory, setWodScoreHistory] = useState([])
   const [loadingProgress, setLoadingProgress] = useState(false)
   const [progressCategory, setProgressCategory] = useState(Object.keys(MOVEMENTS)[0])
+
+  useEffect(() => {
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+      setNotifStatus('unsupported')
+    } else if (Notification.permission === 'granted') {
+      setNotifStatus('granted')
+    } else if (Notification.permission === 'denied') {
+      setNotifStatus('denied')
+    }
+  }, [])
 
   const showToast = (msg, type = 'info') => {
     setToast({ msg, type })
@@ -246,6 +266,35 @@ export default function MemberHome() {
     fetchProgress(movement)
   }
 
+  const enableNotifications = async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      setNotifStatus('unsupported'); return
+    }
+    setNotifStatus('loading')
+    try {
+      const registration = await navigator.serviceWorker.register('/sw.js')
+      await navigator.serviceWorker.ready
+      const permission = await Notification.requestPermission()
+      if (permission !== 'granted') { setNotifStatus('denied'); return }
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(import.meta.env.VITE_VAPID_PUBLIC_KEY)
+      })
+      const { error } = await supabase.from('push_subscriptions').upsert({
+        member_id: member?.id,
+        subscription: JSON.stringify(subscription),
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'member_id' })
+      if (error) throw error
+      setNotifStatus('granted')
+      showToast('🔔 Notifications enabled!', 'success')
+    } catch (err) {
+      console.error('Push setup failed:', err)
+      setNotifStatus('idle')
+      showToast('Could not enable notifications.', 'error')
+    }
+  }
+
   const handleLogout = () => { sessionStorage.removeItem('baby_member'); navigate('/login') }
 
   const firstName = member?.full_name?.split(' ')[0] || 'Athlete'
@@ -342,6 +391,19 @@ export default function MemberHome() {
             </div>
           </>
         )}
+
+            {/* Notifications Card */}
+            <div style={{ ...card, marginBottom: 14 }}>
+              <div style={{ fontSize: 11, color: '#ff6400', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 10 }}>Push Notifications</div>
+              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 12 }}>Get notified when today\'s WOD is posted 🔔</div>
+              <button
+                onClick={enableNotifications}
+                disabled={notifStatus !== 'idle'}
+                style={{ width: '100%', background: notifStatus === 'granted' ? 'rgba(0,200,100,0.15)' : notifStatus === 'denied' ? 'rgba(255,50,50,0.1)' : 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, padding: '13px', color: '#fff', fontSize: 14, fontWeight: 600, cursor: notifStatus === 'idle' ? 'pointer' : 'default', fontFamily: "'DM Sans'" }}>
+                {{'idle': '🔔 Enable Notifications', 'loading': 'Setting up...', 'granted': '✅ Notifications On', 'denied': '🚫 Notifications Blocked', 'unsupported': 'Not Supported'}[notifStatus]}
+              </button>
+              {notifStatus === 'denied' && <div style={{ fontSize: 12, color: 'rgba(255,100,100,0.7)', marginTop: 8, textAlign: 'center' }}>Allow notifications in browser settings.</div>}
+            </div>
 
         {tab === 'wod' && (
           <>
