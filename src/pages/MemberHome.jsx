@@ -125,18 +125,23 @@ export default function MemberHome() {
     if (data) setPbs(data)
   }
 
-  const fetchLeaderboard = async () => {
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-    const { data } = await supabase.from('workout_logs').select('member_id, member_name').gte('logged_at', weekAgo)
-    if (data) {
-      const counts = {}
-      data.forEach(row => {
-        const id = row.member_id
-        counts[id] = { name: row.member_name || 'Unknown', count: (counts[id]?.count || 0) + 1 }
-      })
-      setLeaderboard(Object.values(counts).sort((a, b) => b.count - a.count).slice(0, 10))
-    }
+ const fetchLeaderboard = async () => {
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const { data } = await supabase.from('workout_logs')
+    .select('member_id, member_name, logged_at')
+    .gte('logged_at', weekAgo)
+  if (data) {
+    const counts = {}
+    data.forEach(row => {
+      if (!counts[row.member_id]) counts[row.member_id] = { name: row.member_name || 'Unknown', days: new Set() }
+      counts[row.member_id].days.add(row.logged_at)
+    })
+    const sorted = Object.values(counts)
+      .map(m => ({ name: m.name, count: m.days.size }))
+      .sort((a, b) => b.count - a.count).slice(0, 10)
+    setLeaderboard(sorted)
   }
+}
 
   const checkTodayAttendance = async (memberId) => {
     const today = new Date().toISOString().split('T')[0]
@@ -146,14 +151,13 @@ export default function MemberHome() {
   }
 
   const checkTodayScore = async (memberId) => {
-  const today = new Date().toISOString().split('T')[0]
-  const { data } = await supabase.from('workout_logs').select('id')
-    .eq('member_id', memberId)
-    .eq('logged_at', today)
-    .not('wod_name', 'eq', 'Check-in')
-    .limit(1)
-  if (data && data.length > 0) setScoredToday(true)
-}
+    const today = new Date().toISOString().split('T')[0]
+    const { data } = await supabase.from('workout_logs').select('id')
+      .eq('member_id', memberId).eq('logged_at', today)
+      .not('rounds', 'is', null)
+      .limit(1)
+    if (data && data.length > 0) setScoredToday(true)
+  }
 
   const handleCheckIn = async () => {
     if (checkedIn || !member) return
@@ -168,16 +172,8 @@ export default function MemberHome() {
     setCheckingIn(false)
   }
 
-const handleLogScore = async () => {
-  if (!member || !wod) return
-  const hasScore = scoreForm.rounds || scoreForm.time_minutes || 
-                   scoreForm.weight_kg || scoreForm.reps
-  if (!hasScore) { 
-    showToast('⚠ Enter at least one score field', 'error')
-    return 
-  }
-  setSavingScore(true)
-  // ... rest stays the same
+  const handleLogScore = async () => {
+    if (!member || !wod) return
     setSavingScore(true)
     const totalSecs = (parseInt(scoreForm.time_minutes || 0) * 60) + parseInt(scoreForm.time_seconds || 0)
     const { error } = await supabase.from('workout_logs').insert([{
@@ -380,13 +376,7 @@ const handleLogScore = async () => {
 
             {showScoreForm && wod && !scoredToday && (
               <div style={{ ...card, marginBottom: 14 }}>
-                <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 4 }}>Log Your Score</div>
-<div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 14 }}>
-  {wod.type === 'For Time' ? '⏱ Enter your finishing time' :
-   wod.type === 'AMRAP' ? '🔁 Enter rounds + reps completed' :
-   wod.type === 'Strength' || wod.type === 'EMOM' ? '💪 Enter weight lifted' :
-   'Fill in what applies to your workout'}
-</div>
+                <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 14 }}>Log Your Score</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <div>
