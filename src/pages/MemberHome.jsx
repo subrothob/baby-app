@@ -16,8 +16,7 @@ const MOVEMENTS = {
   '⏱️ Benchmark WODs': ['Fran','Grace','Helen','Annie','Isabel','Karen','Nancy','Cindy','Murph','DT']
 }
 
-
-// VAPID helper
+// ── VAPID helper ──────────────────────────────────────────────────────────────
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
@@ -25,6 +24,7 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map(char => char.charCodeAt(0)))
 }
 
+// ── Mini chart ────────────────────────────────────────────────────────────────
 function MiniLineChart({ data, color = accent }) {
   const canvasRef = useRef(null)
   useEffect(() => {
@@ -73,6 +73,7 @@ function MiniLineChart({ data, color = accent }) {
   return <canvas ref={canvasRef} width={320} height={80} style={{ width: '100%', height: 80 }} />
 }
 
+// ── Main component ────────────────────────────────────────────────────────────
 export default function MemberHome() {
   const navigate = useNavigate()
   const [member, setMember] = useState(null)
@@ -83,7 +84,6 @@ export default function MemberHome() {
   const [checkingIn, setCheckingIn] = useState(false)
   const [scoredToday, setScoredToday] = useState(false)
   const [tab, setTab] = useState('home')
-  const [notifStatus, setNotifStatus] = useState('idle')
   const [toast, setToast] = useState(null)
 
   const [showScoreForm, setShowScoreForm] = useState(false)
@@ -101,21 +101,15 @@ export default function MemberHome() {
   const [loadingProgress, setLoadingProgress] = useState(false)
   const [progressCategory, setProgressCategory] = useState(Object.keys(MOVEMENTS)[0])
 
-  useEffect(() => {
-    if (!('Notification' in window) || !('serviceWorker' in navigator)) {
-      setNotifStatus('unsupported')
-    } else if (Notification.permission === 'granted') {
-      setNotifStatus('granted')
-    } else if (Notification.permission === 'denied') {
-      setNotifStatus('denied')
-    }
-  }, [])
+  // ── Notification state ──────────────────────────────────────────────────────
+  const [notifStatus, setNotifStatus] = useState('idle') // idle | loading | granted | denied | unsupported
 
   const showToast = (msg, type = 'info') => {
     setToast({ msg, type })
     setTimeout(() => setToast(null), 3000)
   }
 
+  // ── Boot ────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const stored = sessionStorage.getItem('baby_member')
     if (!stored) { navigate('/login'); return }
@@ -128,6 +122,17 @@ export default function MemberHome() {
     checkTodayScore(m.id)
   }, [])
 
+  // Detect current notification permission on mount
+  useEffect(() => {
+  if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+    setNotifStatus('unsupported')
+  } else if (Notification.permission === 'denied') {
+    setNotifStatus('denied')
+  }
+  // Remove the 'granted' check — let the button always attempt to save
+}, [])
+
+  // ── Data fetchers ───────────────────────────────────────────────────────────
   const fetchWod = async () => {
     const today = new Date().toISOString().split('T')[0]
     const { data } = await supabase.from('wods').select('*')
@@ -145,23 +150,23 @@ export default function MemberHome() {
     if (data) setPbs(data)
   }
 
- const fetchLeaderboard = async () => {
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-  const { data } = await supabase.from('workout_logs')
-    .select('member_id, member_name, logged_at')
-    .gte('logged_at', weekAgo)
-  if (data) {
-    const counts = {}
-    data.forEach(row => {
-      if (!counts[row.member_id]) counts[row.member_id] = { name: row.member_name || 'Unknown', days: new Set() }
-      counts[row.member_id].days.add(row.logged_at)
-    })
-    const sorted = Object.values(counts)
-      .map(m => ({ name: m.name, count: m.days.size }))
-      .sort((a, b) => b.count - a.count).slice(0, 10)
-    setLeaderboard(sorted)
+  const fetchLeaderboard = async () => {
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    const { data } = await supabase.from('workout_logs')
+      .select('member_id, member_name, logged_at')
+      .gte('logged_at', weekAgo)
+    if (data) {
+      const counts = {}
+      data.forEach(row => {
+        if (!counts[row.member_id]) counts[row.member_id] = { name: row.member_name || 'Unknown', days: new Set() }
+        counts[row.member_id].days.add(row.logged_at)
+      })
+      const sorted = Object.values(counts)
+        .map(m => ({ name: m.name, count: m.days.size }))
+        .sort((a, b) => b.count - a.count).slice(0, 10)
+      setLeaderboard(sorted)
+    }
   }
-}
 
   const checkTodayAttendance = async (memberId) => {
     const today = new Date().toISOString().split('T')[0]
@@ -179,6 +184,7 @@ export default function MemberHome() {
     if (data && data.length > 0) setScoredToday(true)
   }
 
+  // ── Actions ─────────────────────────────────────────────────────────────────
   const handleCheckIn = async () => {
     if (checkedIn || !member) return
     setCheckingIn(true)
@@ -221,14 +227,12 @@ export default function MemberHome() {
     if (!movement || !pbForm.value) { showToast('⚠ Fill in movement and value', 'error'); return }
     setSavingPB(true)
     const numVal = parseFloat(pbForm.value)
-    // Save to pb_history for graph tracking
     await supabase.from('pb_history').insert([{
       member_id: member.id, member_name: member.full_name,
       movement, pb_type: pbForm.pb_type,
       value: pbForm.value, value_numeric: numVal || null,
       achieved_at: new Date().toISOString().split('T')[0]
     }])
-    // Upsert current best
     const { error } = await supabase.from('personal_bests').upsert([{
       member_id: member.id, member_name: member.full_name,
       movement, pb_type: pbForm.pb_type,
@@ -248,12 +252,10 @@ export default function MemberHome() {
   const fetchProgress = async (movementName) => {
     if (!member || !movementName) return
     setLoadingProgress(true)
-    // Use pb_history for graph (multiple entries over time)
     const { data: pbData } = await supabase.from('pb_history').select('*')
       .eq('member_id', member.id).eq('movement', movementName)
       .order('achieved_at', { ascending: true })
     if (pbData) setProgressData(pbData)
-    // WOD score history
     const { data: scoreData } = await supabase.from('workout_logs').select('*')
       .eq('member_id', member.id).ilike('wod_name', `%${movementName}%`)
       .order('logged_at', { ascending: true }).limit(20)
@@ -266,6 +268,7 @@ export default function MemberHome() {
     fetchProgress(movement)
   }
 
+  // ── Push notifications ──────────────────────────────────────────────────────
   const enableNotifications = async () => {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
       setNotifStatus('unsupported'); return
@@ -274,17 +277,21 @@ export default function MemberHome() {
     try {
       const registration = await navigator.serviceWorker.register('/sw.js')
       await navigator.serviceWorker.ready
+
       const permission = await Notification.requestPermission()
       if (permission !== 'granted') { setNotifStatus('denied'); return }
+
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(import.meta.env.VITE_VAPID_PUBLIC_KEY)
       })
+
       const { error } = await supabase.from('push_subscriptions').upsert({
         member_id: member?.id,
         subscription: JSON.stringify(subscription),
         updated_at: new Date().toISOString()
       }, { onConflict: 'member_id' })
+
       if (error) throw error
       setNotifStatus('granted')
       showToast('🔔 Notifications enabled!', 'success')
@@ -297,6 +304,7 @@ export default function MemberHome() {
 
   const handleLogout = () => { sessionStorage.removeItem('baby_member'); navigate('/login') }
 
+  // ── Derived ─────────────────────────────────────────────────────────────────
   const firstName = member?.full_name?.split(' ')[0] || 'Athlete'
   const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })
 
@@ -314,10 +322,26 @@ export default function MemberHome() {
     fontFamily: "'DM Sans', sans-serif", boxSizing: 'border-box'
   }
 
+  const notifLabel = {
+    idle: '🔔 Enable Notifications',
+    loading: 'Setting up...',
+    granted: '✅ Notifications On',
+    denied: '🚫 Notifications Blocked',
+    unsupported: 'Notifications Not Supported'
+  }[notifStatus]
+
+  const notifBg = notifStatus === 'granted'
+    ? 'rgba(0,200,100,0.15)'
+    : notifStatus === 'denied' || notifStatus === 'unsupported'
+      ? 'rgba(255,50,50,0.1)'
+      : 'rgba(255,255,255,0.06)'
+
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div style={{ background: '#0a0a0a', minHeight: '100vh', color: '#fff', fontFamily: "'DM Sans', sans-serif", paddingBottom: 80, maxWidth: 480, margin: '0 auto', position: 'relative' }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
 
+      {/* Header */}
       <div style={{ padding: '48px 20px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 2 }}>{today}</div>
@@ -328,8 +352,10 @@ export default function MemberHome() {
 
       <div style={{ padding: '0 20px' }}>
 
+        {/* ── HOME TAB ── */}
         {tab === 'home' && (
           <>
+            {/* Check-in card */}
             <div style={{ ...card, marginBottom: 14, background: checkedIn ? 'rgba(0,200,100,0.08)' : accentDim, border: `1px solid ${checkedIn ? 'rgba(0,200,100,0.25)' : 'rgba(255,100,0,0.3)'}` }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div>
@@ -344,6 +370,7 @@ export default function MemberHome() {
               </div>
             </div>
 
+            {/* WOD preview */}
             <div style={{ ...card, marginBottom: 14 }}>
               <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 10 }}>Today's WOD</div>
               {wod ? (
@@ -358,6 +385,7 @@ export default function MemberHome() {
               ) : <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14 }}>No WOD posted yet. Check back soon! 💤</div>}
             </div>
 
+            {/* PBs preview */}
             <div style={{ ...card, marginBottom: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600 }}>My Personal Bests</div>
@@ -375,7 +403,8 @@ export default function MemberHome() {
               ) : <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 13 }}>No PBs logged yet. Start tracking! 🏋️</div>}
             </div>
 
-            <div style={{ ...card }}>
+            {/* Leaderboard preview */}
+            <div style={{ ...card, marginBottom: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600 }}>This Week's Leaders</div>
                 <button onClick={() => setTab('board')} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', fontSize: 12, cursor: 'pointer' }}>Full board →</button>
@@ -389,22 +418,36 @@ export default function MemberHome() {
               ))}
               {leaderboard.length === 0 && <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 13 }}>Check in to appear on the board! 🏅</div>}
             </div>
-          </>
-        )}
 
-            {/* Notifications Card */}
+            {/* ── NOTIFICATIONS CARD ── */}
             <div style={{ ...card, marginBottom: 14 }}>
-              <div style={{ fontSize: 11, color: '#ff6400', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 10 }}>Push Notifications</div>
-              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 12 }}>Get notified when today\'s WOD is posted 🔔</div>
+              <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 10 }}>Push Notifications</div>
+              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 12 }}>
+                Get notified when today's WOD is posted 🔔
+              </div>
               <button
                 onClick={enableNotifications}
                 disabled={notifStatus !== 'idle'}
-                style={{ width: '100%', background: notifStatus === 'granted' ? 'rgba(0,200,100,0.15)' : notifStatus === 'denied' ? 'rgba(255,50,50,0.1)' : 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, padding: '13px', color: '#fff', fontSize: 14, fontWeight: 600, cursor: notifStatus === 'idle' ? 'pointer' : 'default', fontFamily: "'DM Sans'" }}>
-                {{'idle': '🔔 Enable Notifications', 'loading': 'Setting up...', 'granted': '✅ Notifications On', 'denied': '🚫 Notifications Blocked', 'unsupported': 'Not Supported'}[notifStatus]}
+                style={{
+                  width: '100%', background: notifBg,
+                  border: `1px solid ${notifStatus === 'granted' ? 'rgba(0,200,100,0.3)' : notifStatus === 'denied' ? 'rgba(255,50,50,0.3)' : 'rgba(255,255,255,0.1)'}`,
+                  borderRadius: 12, padding: '13px', color: '#fff', fontSize: 14,
+                  fontWeight: 600, cursor: notifStatus === 'idle' ? 'pointer' : 'default',
+                  fontFamily: "'DM Sans'", opacity: notifStatus === 'loading' ? 0.6 : 1,
+                  transition: 'opacity 0.2s'
+                }}>
+                {notifLabel}
               </button>
-              {notifStatus === 'denied' && <div style={{ fontSize: 12, color: 'rgba(255,100,100,0.7)', marginTop: 8, textAlign: 'center' }}>Allow notifications in browser settings.</div>}
+              {notifStatus === 'denied' && (
+                <div style={{ fontSize: 12, color: 'rgba(255,100,100,0.7)', marginTop: 8, textAlign: 'center' }}>
+                  Open browser settings → allow notifications for this site.
+                </div>
+              )}
             </div>
+          </>
+        )}
 
+        {/* ── WOD TAB ── */}
         {tab === 'wod' && (
           <>
             <div style={{ ...card, marginBottom: 14 }}>
@@ -475,6 +518,7 @@ export default function MemberHome() {
           </>
         )}
 
+        {/* ── PROGRESS TAB ── */}
         {tab === 'progress' && (
           <div>
             <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 14 }}>Progress Tracker 📈</div>
@@ -577,6 +621,7 @@ export default function MemberHome() {
           </div>
         )}
 
+        {/* ── PBs TAB ── */}
         {tab === 'pbs' && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
@@ -662,6 +707,7 @@ export default function MemberHome() {
           </div>
         )}
 
+        {/* ── LEADERBOARD TAB ── */}
         {tab === 'board' && (
           <div>
             <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>This Week's Leaderboard</div>
@@ -686,6 +732,7 @@ export default function MemberHome() {
         )}
       </div>
 
+      {/* Bottom nav */}
       <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 480, background: 'rgba(10,10,10,0.95)', borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', backdropFilter: 'blur(20px)' }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, background: 'none', border: 'none', padding: '12px 0 16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
@@ -695,6 +742,7 @@ export default function MemberHome() {
         ))}
       </div>
 
+      {/* Toast */}
       {toast && (
         <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', background: toast.type === 'success' ? 'rgba(0,200,100,0.9)' : toast.type === 'error' ? 'rgba(255,50,50,0.9)' : 'rgba(50,50,50,0.9)', color: '#fff', padding: '12px 20px', borderRadius: 12, fontSize: 14, fontWeight: 500, zIndex: 999, whiteSpace: 'nowrap' }}>
           {toast.msg}
