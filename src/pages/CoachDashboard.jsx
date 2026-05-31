@@ -16,6 +16,13 @@ export default function CoachDashboard() {
   const [loading, setLoading] = useState(false)
   const [toast, setToast] = useState(null)
 
+  // ── Notify state ──────────────────────────────────────────
+  const [notifyModal, setNotifyModal] = useState(false)
+  const [notifyTitle, setNotifyTitle] = useState('')
+  const [notifyBody, setNotifyBody] = useState('')
+  const [notifySending, setNotifySending] = useState(false)
+  // ─────────────────────────────────────────────────────────
+
   const [wod, setWod] = useState({
     name: '', type: 'AMRAP', warmup: '', strength: '', conditioning: '', cooldown: '', scaling: '',
     scheduled_date: new Date().toISOString().split('T')[0]
@@ -95,6 +102,42 @@ export default function CoachDashboard() {
     if (!error) { showToast('WOD deleted', 'info'); fetchScheduledWods() }
   }
 
+  // ── Send push notification to all subscribed members ─────
+  const sendNotification = async () => {
+    if (!notifyTitle.trim()) {
+      showToast('⚠ Add a notification title', 'error')
+      return
+    }
+    setNotifySending(true)
+    try {
+      const res = await fetch('/api/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: notifyTitle.trim(), body: notifyBody.trim() })
+      })
+      const data = await res.json()
+      if (res.ok) {
+        showToast(`✅ Sent to ${data.sent ?? 'all'} members!`, 'success')
+        setNotifyModal(false)
+        setNotifyTitle('')
+        setNotifyBody('')
+      } else {
+        showToast(data.error || 'Send failed. Try again.', 'error')
+      }
+    } catch {
+      showToast('Network error. Check your connection.', 'error')
+    }
+    setNotifySending(false)
+  }
+
+  // Quick-fill helpers for common notifications
+  const quickFills = [
+    { label: "Today's WOD is live 🔥", body: "Check the app for today's workout. See you at the box!" },
+    { label: 'Class reminder ⏰', body: "Don't forget — class starts in 30 mins. Get ready!" },
+    { label: 'Box closed 🚪', body: "The box is closed today. Rest up and we'll see you tomorrow!" },
+  ]
+  // ─────────────────────────────────────────────────────────
+
   const handleLogout = () => { sessionStorage.removeItem('baby_member'); navigate('/login') }
 
   const inputStyle = {
@@ -113,7 +156,6 @@ export default function CoachDashboard() {
     { id: 'members', label: 'Members', icon: '👥' },
   ]
 
-  // Next 7 days for quick date selection
   const next7Days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date()
     d.setDate(d.getDate() + i)
@@ -132,7 +174,16 @@ export default function CoachDashboard() {
           <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 2 }}>{today}</div>
           <div style={{ fontFamily: "'Bebas Neue'", fontSize: 30, letterSpacing: 2, lineHeight: 1 }}>COACH DASHBOARD 📋</div>
         </div>
-        <button onClick={handleLogout} style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '8px 14px', color: 'rgba(255,255,255,0.5)', fontSize: 12, cursor: 'pointer' }}>Sign Out</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {/* ── Notify Members button ── */}
+          <button
+            onClick={() => setNotifyModal(true)}
+            style={{ background: accentDim, border: `1px solid rgba(255,100,0,0.3)`, borderRadius: 10, padding: '8px 14px', color: accent, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'", display: 'flex', alignItems: 'center', gap: 5 }}
+          >
+            🔔 Notify
+          </button>
+          <button onClick={handleLogout} style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '8px 14px', color: 'rgba(255,255,255,0.5)', fontSize: 12, cursor: 'pointer' }}>Sign Out</button>
+        </div>
       </div>
 
       <div style={{ padding: '0 20px' }}>
@@ -140,7 +191,7 @@ export default function CoachDashboard() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
           {[
             { label: 'Members', val: members.length, icon: '👥' },
-            { label: 'Today\'s Check-ins', val: checkins.length, icon: '✅' },
+            { label: "Today's Check-ins", val: checkins.length, icon: '✅' },
             { label: 'WODs Scheduled', val: scheduledWods.length, icon: '📅' },
           ].map((s, i) => (
             <div key={i} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: '12px 10px', textAlign: 'center' }}>
@@ -156,7 +207,6 @@ export default function CoachDashboard() {
           <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600 }}>Post / Schedule WOD</div>
 
-            {/* Schedule Date */}
             <div>
               <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>📅 Schedule For</div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
@@ -170,7 +220,6 @@ export default function CoachDashboard() {
               <input type="date" style={{ ...inputStyle, colorScheme: 'dark', resize: 'none' }} value={wod.scheduled_date} onChange={e => setWod(w => ({ ...w, scheduled_date: e.target.value }))} />
             </div>
 
-            {/* WOD Type */}
             <div>
               <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>WOD Type</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -216,6 +265,18 @@ export default function CoachDashboard() {
             <button onClick={postWod} disabled={loading} style={{ background: accent, border: 'none', borderRadius: 12, padding: '14px', color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'", opacity: loading ? 0.6 : 1 }}>
               {loading ? 'Scheduling...' : `🚀 Schedule WOD for ${wod.scheduled_date === new Date().toISOString().split('T')[0] ? 'Today' : wod.scheduled_date}`}
             </button>
+
+            {/* ── Quick notify after scheduling ── */}
+            <button
+              onClick={() => {
+                setNotifyTitle("Today's WOD is live 🔥")
+                setNotifyBody("Check the app for today's workout. See you at the box!")
+                setNotifyModal(true)
+              }}
+              style={{ background: 'transparent', border: '1px solid rgba(255,100,0,0.2)', borderRadius: 12, padding: '11px', color: 'rgba(255,100,0,0.7)', fontSize: 13, cursor: 'pointer', fontFamily: "'DM Sans'" }}
+            >
+              🔔 Notify members about this WOD
+            </button>
           </div>
         )}
 
@@ -236,7 +297,19 @@ export default function CoachDashboard() {
                     </div>
                     {w.conditioning && <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', lineHeight: 1.4 }}>{w.conditioning.substring(0, 80)}{w.conditioning.length > 80 ? '...' : ''}</div>}
                   </div>
-                  <button onClick={() => deleteWod(w.id)} style={{ background: 'rgba(255,50,50,0.1)', border: '1px solid rgba(255,50,50,0.2)', borderRadius: 8, padding: '4px 10px', color: 'rgba(255,80,80,0.8)', fontSize: 11, cursor: 'pointer', marginLeft: 10, flexShrink: 0 }}>Delete</button>
+                  <div style={{ display: 'flex', gap: 6, marginLeft: 10, flexShrink: 0 }}>
+                    {/* ── Per-WOD notify button ── */}
+                    <button
+                      onClick={() => {
+                        const dateLabel = w.scheduled_date === new Date().toISOString().split('T')[0] ? "today's" : `${new Date(w.scheduled_date + 'T12:00:00').toLocaleDateString('en-IN', { weekday: 'long' })}'s`
+                        setNotifyTitle(`${dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1)} WOD is up! 🔥`)
+                        setNotifyBody(w.conditioning ? w.conditioning.substring(0, 100) : '')
+                        setNotifyModal(true)
+                      }}
+                      style={{ background: accentDim, border: '1px solid rgba(255,100,0,0.2)', borderRadius: 8, padding: '4px 10px', color: accent, fontSize: 11, cursor: 'pointer' }}
+                    >🔔</button>
+                    <button onClick={() => deleteWod(w.id)} style={{ background: 'rgba(255,50,50,0.1)', border: '1px solid rgba(255,50,50,0.2)', borderRadius: 8, padding: '4px 10px', color: 'rgba(255,80,80,0.8)', fontSize: 11, cursor: 'pointer' }}>Delete</button>
+                  </div>
                 </div>
               </div>
             )) : (
@@ -251,7 +324,18 @@ export default function CoachDashboard() {
         {/* CHECK-INS TAB */}
         {tab === 'checkins' && (
           <div>
-            <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>Today's Check-ins ({checkins.length})</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600 }}>Today's Check-ins ({checkins.length})</div>
+              {/* ── Notify from check-ins tab ── */}
+              <button
+                onClick={() => {
+                  setNotifyTitle('Class reminder ⏰')
+                  setNotifyBody("Don't forget — class starts in 30 mins. Get ready!")
+                  setNotifyModal(true)
+                }}
+                style={{ background: accentDim, border: `1px solid rgba(255,100,0,0.2)`, borderRadius: 8, padding: '5px 12px', color: accent, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'" }}
+              >🔔 Notify</button>
+            </div>
             {checkins.length > 0 ? checkins.map((c, i) => (
               <div key={i} style={{ ...card, display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                 <div style={{ width: 36, height: 36, borderRadius: '50%', background: accentDim, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>💪</div>
@@ -301,6 +385,65 @@ export default function CoachDashboard() {
           </button>
         ))}
       </div>
+
+      {/* ── Notify Members Modal ─────────────────────────────── */}
+      {notifyModal && (
+        <div
+          onClick={e => { if (e.target === e.currentTarget) setNotifyModal(false) }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 100, backdropFilter: 'blur(4px)' }}
+        >
+          <div style={{ background: '#141414', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px 20px 0 0', padding: '24px 20px 36px', width: '100%', maxWidth: 480 }}>
+            {/* Handle */}
+            <div style={{ width: 36, height: 4, background: 'rgba(255,255,255,0.15)', borderRadius: 99, margin: '0 auto 20px' }} />
+
+            <div style={{ fontFamily: "'Bebas Neue'", fontSize: 22, letterSpacing: 2, marginBottom: 4 }}>🔔 NOTIFY MEMBERS</div>
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', marginBottom: 18 }}>Push notification to all subscribed members</div>
+
+            {/* Quick-fill chips */}
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginBottom: 8 }}>Quick fill →</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+              {quickFills.map((q, i) => (
+                <button key={i} onClick={() => { setNotifyTitle(q.label); setNotifyBody(q.body) }}
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '5px 10px', color: 'rgba(255,255,255,0.55)', fontSize: 11, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
+                  {q.label}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>Title *</div>
+              <input
+                style={{ width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', fontFamily: "'DM Sans'", boxSizing: 'border-box' }}
+                placeholder="e.g. Today's WOD is live 🔥"
+                value={notifyTitle}
+                onChange={e => setNotifyTitle(e.target.value)}
+                maxLength={65}
+              />
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>Message (optional)</div>
+              <textarea
+                style={{ width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', fontFamily: "'DM Sans'", boxSizing: 'border-box', resize: 'vertical', minHeight: 70 }}
+                placeholder="See you at the box!"
+                value={notifyBody}
+                onChange={e => setNotifyBody(e.target.value)}
+                maxLength={120}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setNotifyModal(false)} style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, padding: '13px', color: 'rgba(255,255,255,0.5)', fontSize: 14, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
+                Cancel
+              </button>
+              <button onClick={sendNotification} disabled={notifySending || !notifyTitle.trim()} style={{ flex: 2, background: accent, border: 'none', borderRadius: 12, padding: '13px', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'", opacity: (notifySending || !notifyTitle.trim()) ? 0.55 : 1 }}>
+                {notifySending ? 'Sending...' : `🚀 Send to All Members`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ───────────────────────────────────────────────────── */}
 
       {toast && <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', background: toast.type === 'success' ? 'rgba(0,200,100,0.9)' : toast.type === 'error' ? 'rgba(255,50,50,0.9)' : 'rgba(50,50,50,0.9)', color: '#fff', padding: '12px 20px', borderRadius: 12, fontSize: 14, fontWeight: 500, zIndex: 999, whiteSpace: 'nowrap' }}>{toast.msg}</div>}
     </div>
