@@ -88,7 +88,28 @@ export default function CoachDashboard() {
       posted_at: new Date().toISOString()
     }])
     if (!error) {
-      showToast('✅ WOD scheduled! Members will see it on the day.', 'success')
+      // Auto-notify all subscribed members
+      const isToday = wod.scheduled_date === new Date().toISOString().split('T')[0]
+      const dateLabel = isToday ? "Today's" : `${new Date(wod.scheduled_date + 'T12:00:00').toLocaleDateString('en-IN', { weekday: 'long' })}'s`
+      const notifyTitle = `${dateLabel} WOD is live! 🔥`
+      const notifyBody = wod.conditioning
+        ? wod.conditioning.substring(0, 100)
+        : wod.strength
+          ? wod.strength.substring(0, 100)
+          : 'Check the app for today\'s workout.'
+
+      try {
+        await fetch('/api/notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: notifyTitle, body: notifyBody })
+        })
+        showToast('✅ WOD scheduled & members notified!', 'success')
+      } catch {
+        // WOD saved fine, notify just failed silently
+        showToast('✅ WOD scheduled! (Notification failed)', 'success')
+      }
+
       setWod({ name: '', type: 'AMRAP', warmup: '', strength: '', conditioning: '', cooldown: '', scaling: '', scheduled_date: new Date().toISOString().split('T')[0] })
       fetchScheduledWods()
     } else {
@@ -266,17 +287,7 @@ export default function CoachDashboard() {
               {loading ? 'Scheduling...' : `🚀 Schedule WOD for ${wod.scheduled_date === new Date().toISOString().split('T')[0] ? 'Today' : wod.scheduled_date}`}
             </button>
 
-            {/* ── Quick notify after scheduling ── */}
-            <button
-              onClick={() => {
-                setNotifyTitle("Today's WOD is live 🔥")
-                setNotifyBody("Check the app for today's workout. See you at the box!")
-                setNotifyModal(true)
-              }}
-              style={{ background: 'transparent', border: '1px solid rgba(255,100,0,0.2)', borderRadius: 12, padding: '11px', color: 'rgba(255,100,0,0.7)', fontSize: 13, cursor: 'pointer', fontFamily: "'DM Sans'" }}
-            >
-              🔔 Notify members about this WOD
-            </button>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)', textAlign: 'center' }}>🔔 Members are notified automatically when you schedule a WOD</div>
           </div>
         )}
 
@@ -284,6 +295,10 @@ export default function CoachDashboard() {
         {tab === 'schedule' && (
           <div>
             <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>Upcoming WODs ({scheduledWods.length})</div>
+            <button onClick={() => navigate('/leaderboard')}
+              style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: '13px', color: 'rgba(255,255,255,0.5)', fontSize: 13, cursor: 'pointer', fontFamily: "'DM Sans'", marginBottom: 12 }}>
+              🏅 View Today's Leaderboard
+            </button>
             {scheduledWods.length > 0 ? scheduledWods.map((w, i) => (
               <div key={i} style={{ ...card, marginBottom: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>

@@ -287,7 +287,7 @@ export default function MemberHome() {
       })
 
       const { error } = await supabase.from('push_subscriptions').upsert({
-        member_id: member?.id,
+       member_id: (() => { const s = sessionStorage.getItem('baby_member'); return s ? JSON.parse(s).id : member?.id })(),
         subscription: JSON.stringify(subscription),
         updated_at: new Date().toISOString()
       }, { onConflict: 'member_id' })
@@ -381,6 +381,16 @@ export default function MemberHome() {
                   </div>
                   {wod.conditioning && <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 6 }}>{wod.conditioning.slice(0, 80)}...</div>}
                   <button onClick={() => setTab('wod')} style={{ background: 'none', border: 'none', color: accent, fontSize: 13, cursor: 'pointer', padding: 0, fontWeight: 500 }}>See full WOD →</button>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                    <button onClick={() => navigate('/log-result')}
+                      style={{ flex: 1, background: accent, border: 'none', borderRadius: 10, padding: '11px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
+                      🏆 Log My Result
+                    </button>
+                    <button onClick={() => navigate('/leaderboard')}
+                      style={{ flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '11px', color: 'rgba(255,255,255,0.6)', fontSize: 13, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
+                      🏅 Leaderboard
+                    </button>
+                  </div>
                 </>
               ) : <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14 }}>No WOD posted yet. Check back soon! 💤</div>}
             </div>
