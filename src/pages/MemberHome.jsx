@@ -480,51 +480,15 @@ export default function MemberHome() {
                       ✅ Score logged today! Great work 💪
                     </div>
                   ) : (
-                    <button onClick={() => setShowScoreForm(!showScoreForm)}
+                    <button onClick={() => navigate('/log-result')}
                       style={{ width: '100%', background: accent, border: 'none', borderRadius: 12, padding: '14px', color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'", marginTop: 8 }}>
-                      {showScoreForm ? '✕ Cancel' : '📝 Log My Score'}
+                      🏆 Log My Result
                     </button>
                   )}
                 </>
               ) : <div style={{ color: 'rgba(255,255,255,0.3)', textAlign: 'center', padding: '40px 0' }}>No WOD posted yet 💤</div>}
             </div>
 
-            {showScoreForm && wod && !scoredToday && (
-              <div style={{ ...card, marginBottom: 14 }}>
-                <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 14 }}>Log Your Score</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    <div>
-                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>Rounds</div>
-                      <input style={inputStyle} type="number" placeholder="e.g. 12" value={scoreForm.rounds} onChange={e => setScoreForm(f => ({ ...f, rounds: e.target.value }))} />
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>Reps</div>
-                      <input style={inputStyle} type="number" placeholder="e.g. 5" value={scoreForm.reps} onChange={e => setScoreForm(f => ({ ...f, reps: e.target.value }))} />
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>Time (min : sec)</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                      <input style={inputStyle} type="number" placeholder="Minutes" value={scoreForm.time_minutes} onChange={e => setScoreForm(f => ({ ...f, time_minutes: e.target.value }))} />
-                      <input style={inputStyle} type="number" placeholder="Seconds" value={scoreForm.time_seconds} onChange={e => setScoreForm(f => ({ ...f, time_seconds: e.target.value }))} />
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>Weight Used (kg)</div>
-                    <input style={inputStyle} type="number" placeholder="e.g. 42.5" value={scoreForm.weight_kg} onChange={e => setScoreForm(f => ({ ...f, weight_kg: e.target.value }))} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>Notes</div>
-                    <input style={inputStyle} placeholder="How did it feel? Any notes..." value={scoreForm.notes} onChange={e => setScoreForm(f => ({ ...f, notes: e.target.value }))} />
-                  </div>
-                  <button onClick={handleLogScore} disabled={savingScore}
-                    style={{ background: accent, border: 'none', borderRadius: 12, padding: '14px', color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'", opacity: savingScore ? 0.6 : 1 }}>
-                    {savingScore ? 'Saving...' : '💾 Save Score'}
-                  </button>
-                </div>
-              </div>
-            )}
           </>
         )}
 
@@ -717,28 +681,9 @@ export default function MemberHome() {
           </div>
         )}
 
-        {/* ── LEADERBOARD TAB ── */}
+        {/* ── BOARD TAB — WOD Leaderboard ── */}
         {tab === 'board' && (
-          <div>
-            <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>This Week's Leaderboard</div>
-            {leaderboard.length > 0 ? leaderboard.map((m, i) => (
-              <div key={i} style={{ ...card, display: 'flex', alignItems: 'center', gap: 14, marginBottom: 10 }}>
-                <div style={{ width: 36, height: 36, borderRadius: '50%', background: i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : i === 2 ? '#CD7F32' : 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>
-                  {i < 3 ? ['🥇', '🥈', '🥉'][i] : <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{i + 1}</span>}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>{m.name}</div>
-                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>{m.count} sessions this week</div>
-                </div>
-                <div style={{ background: accentDim, color: accent, fontSize: 13, fontWeight: 700, padding: '6px 12px', borderRadius: 10 }}>{m.count}x</div>
-              </div>
-            )) : (
-              <div style={{ ...card, textAlign: 'center', padding: '40px 20px', color: 'rgba(255,255,255,0.3)' }}>
-                <div style={{ fontSize: 40, marginBottom: 10 }}>📊</div>
-                No sessions this week yet.<br />Check in to get on the board!
-              </div>
-            )}
-          </div>
+          <BoardTab member={member} navigate={navigate} accent={accent} accentDim={accentDim} card={card} />
         )}
       </div>
 
