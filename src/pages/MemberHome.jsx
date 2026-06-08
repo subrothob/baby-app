@@ -846,20 +846,14 @@ export default function MemberHome() {
           <div>
             <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 14 }}>Progress Tracker 📈</div>
 
-            {/* Category filter — scrollable with fade hint */}
-            <div style={{ position: 'relative', marginBottom: 12 }}>
-              <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                {Object.keys(MOVEMENTS).map(cat => (
-                  <button key={cat} onClick={() => setProgressCategory(cat)}
-                    style={{ background: progressCategory === cat ? accentDim : 'rgba(255,255,255,0.04)', border: `1px solid ${progressCategory === cat ? 'rgba(255,100,0,0.4)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 20, padding: '6px 14px', color: progressCategory === cat ? accent : 'rgba(255,255,255,0.5)', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: "'DM Sans'", flexShrink: 0 }}>
-                    {cat}
-                  </button>
-                ))}
-              </div>
-              {/* Right fade + arrow hint */}
-              <div style={{ position: 'absolute', right: 0, top: 0, bottom: 8, width: 48, background: 'linear-gradient(to right, transparent, #0a0a0a)', pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.35)', paddingRight: 4 }}>›</span>
-              </div>
+            {/* Category filter — wrapped grid, all visible */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+              {Object.keys(MOVEMENTS).map(cat => (
+                <button key={cat} onClick={() => setProgressCategory(cat)}
+                  style={{ background: progressCategory === cat ? accentDim : 'rgba(255,255,255,0.04)', border: `1px solid ${progressCategory === cat ? 'rgba(255,100,0,0.4)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 20, padding: '7px 14px', color: progressCategory === cat ? accent : 'rgba(255,255,255,0.5)', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: "'DM Sans'", fontWeight: progressCategory === cat ? 600 : 400 }}>
+                  {cat}
+                </button>
+              ))}
             </div>
 
             <div style={{ ...card, marginBottom: 14 }}>
