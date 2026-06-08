@@ -16,6 +16,26 @@ const MOVEMENTS = {
   '⏱️ Benchmark WODs': ['Fran','Grace','Helen','Annie','Isabel','Karen','Nancy','Cindy','Murph','DT']
 }
 
+// Category each movement belongs to, for grouping PBs
+const MOVEMENT_CATEGORY = {}
+Object.entries(MOVEMENTS).forEach(([cat, moves]) => moves.forEach(m => { MOVEMENT_CATEGORY[m] = cat }))
+
+// Convert "mm:ss" time string → seconds for chart plotting
+function timeToSeconds(str) {
+  if (!str || typeof str !== 'string') return null
+  const parts = str.split(':').map(Number)
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  return null
+}
+
+// Format seconds back to mm:ss
+function secondsToTime(secs) {
+  if (secs == null) return ''
+  const m = Math.floor(secs / 60), s = secs % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
 // ── VAPID helper ──────────────────────────────────────────────────────────────
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -24,8 +44,8 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map(char => char.charCodeAt(0)))
 }
 
-// ── Mini chart ────────────────────────────────────────────────────────────────
-function MiniLineChart({ data, color = accent }) {
+// ── Mini line chart — handles both numeric and time values ────────────────────
+function MiniLineChart({ data, color = accent, isTime = false }) {
   const canvasRef = useRef(null)
   useEffect(() => {
     const canvas = canvasRef.current
@@ -33,44 +53,112 @@ function MiniLineChart({ data, color = accent }) {
     const ctx = canvas.getContext('2d')
     const w = canvas.width, h = canvas.height
     const pad = 8
-    const vals = data.map(d => parseFloat(d.value_numeric || d.value) || 0)
+
+    // Resolve numeric value for each point
+    const vals = data.map(d => {
+      if (isTime) return timeToSeconds(d.value) ?? 0
+      return parseFloat(d.value_numeric ?? d.value) || 0
+    })
+
     const min = Math.min(...vals), max = Math.max(...vals)
     const range = max - min || 1
+
+    // For time: lower = better, so flip the y-axis
+    const yFor = (v) => {
+      const norm = (v - min) / range
+      return isTime
+        ? pad + norm * (h - pad * 2)           // lower time → top of chart
+        : h - pad - norm * (h - pad * 2)        // higher value → top of chart
+    }
+
     ctx.clearRect(0, 0, w, h)
+
+    // Gradient fill
     const grad = ctx.createLinearGradient(0, 0, 0, h)
-    grad.addColorStop(0, color + '55')
+    grad.addColorStop(0, color + '44')
     grad.addColorStop(1, 'transparent')
     ctx.beginPath()
     data.forEach((d, i) => {
       const x = pad + (i / (data.length - 1)) * (w - pad * 2)
-      const y = h - pad - ((parseFloat(d.value_numeric || d.value) - min) / range) * (h - pad * 2)
+      const y = yFor(vals[i])
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
     })
-    ctx.lineTo(pad + (w - pad * 2), h)
-    ctx.lineTo(pad, h)
+    const lastX = pad + (w - pad * 2)
+    const firstX = pad
+    ctx.lineTo(lastX, isTime ? 0 : h)
+    ctx.lineTo(firstX, isTime ? 0 : h)
     ctx.closePath()
     ctx.fillStyle = grad
     ctx.fill()
+
+    // Line
     ctx.beginPath()
     data.forEach((d, i) => {
       const x = pad + (i / (data.length - 1)) * (w - pad * 2)
-      const y = h - pad - ((parseFloat(d.value_numeric || d.value) - min) / range) * (h - pad * 2)
+      const y = yFor(vals[i])
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
     })
     ctx.strokeStyle = color
-    ctx.lineWidth = 2
+    ctx.lineWidth = 2.5
+    ctx.lineJoin = 'round'
     ctx.stroke()
+
+    // Dots + date labels
     data.forEach((d, i) => {
       const x = pad + (i / (data.length - 1)) * (w - pad * 2)
-      const y = h - pad - ((parseFloat(d.value_numeric || d.value) - min) / range) * (h - pad * 2)
+      const y = yFor(vals[i])
       ctx.beginPath()
-      ctx.arc(x, y, 3, 0, Math.PI * 2)
+      ctx.arc(x, y, 3.5, 0, Math.PI * 2)
       ctx.fillStyle = color
       ctx.fill()
     })
-  }, [data, color])
-  if (data.length < 2) return <div style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12, textAlign: 'center', padding: '20px 0' }}>Log at least 2 entries to see graph</div>
-  return <canvas ref={canvasRef} width={320} height={80} style={{ width: '100%', height: 80 }} />
+  }, [data, color, isTime])
+
+  if (data.length < 2) return (
+    <div style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12, textAlign: 'center', padding: '20px 0' }}>
+      Log at least 2 entries to see graph
+    </div>
+  )
+  return <canvas ref={canvasRef} width={320} height={90} style={{ width: '100%', height: 90 }} />
+}
+
+// ── Streak fire bar ───────────────────────────────────────────────────────────
+function StreakBar({ streak, longestStreak }) {
+  const fire = streak >= 14 ? '🔥🔥🔥' : streak >= 7 ? '🔥🔥' : '🔥'
+  const color = streak >= 14 ? '#ff3a00' : streak >= 7 ? '#ff6400' : '#ff9500'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ fontSize: 28 }}>{fire}</div>
+      <div>
+        <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1, fontFamily: "'Bebas Neue'" }}>
+          {streak} DAY STREAK
+        </div>
+        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>
+          Best: {longestStreak} days
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── 30-day attendance mini calendar dots ─────────────────────────────────────
+function AttendanceDots({ attendedDates }) {
+  const days = Array.from({ length: 28 }, (_, i) => {
+    const d = new Date()
+    d.setDate(d.getDate() - (27 - i))
+    return d.toISOString().split('T')[0]
+  })
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(14, 1fr)', gap: 4, marginTop: 10 }}>
+      {days.map(date => (
+        <div key={date} title={date} style={{
+          width: '100%', aspectRatio: '1', borderRadius: 3,
+          background: attendedDates.has(date) ? accent : 'rgba(255,255,255,0.07)',
+          boxShadow: attendedDates.has(date) ? `0 0 4px ${accent}88` : 'none'
+        }} />
+      ))}
+    </div>
+  )
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -86,9 +174,11 @@ export default function MemberHome() {
   const [tab, setTab] = useState('home')
   const [toast, setToast] = useState(null)
 
-  const [showScoreForm, setShowScoreForm] = useState(false)
-  const [scoreForm, setScoreForm] = useState({ rounds: '', time_minutes: '', time_seconds: '', weight_kg: '', reps: '', notes: '' })
-  const [savingScore, setSavingScore] = useState(false)
+  // Streak
+  const [streak, setStreak] = useState(0)
+  const [longestStreak, setLongestStreak] = useState(0)
+  const [attendedDates, setAttendedDates] = useState(new Set())
+  const [totalSessions, setTotalSessions] = useState(0)
 
   const [showPBForm, setShowPBForm] = useState(false)
   const [pbForm, setPbForm] = useState({ movement: '', custom_movement: '', pb_type: 'Weight', value: '' })
@@ -101,8 +191,14 @@ export default function MemberHome() {
   const [loadingProgress, setLoadingProgress] = useState(false)
   const [progressCategory, setProgressCategory] = useState(Object.keys(MOVEMENTS)[0])
 
-  // ── Notification state ──────────────────────────────────────────────────────
-  const [notifStatus, setNotifStatus] = useState('idle') // idle | loading | granted | denied | unsupported
+  // Goals
+  const [goals, setGoals] = useState([]) // [{ movement, target_value, pb_type }]
+  const [showGoalForm, setShowGoalForm] = useState(false)
+  const [goalForm, setGoalForm] = useState({ movement: '', target_value: '', pb_type: 'Weight' })
+  const [savingGoal, setSavingGoal] = useState(false)
+
+  // Notification state
+  const [notifStatus, setNotifStatus] = useState('idle')
 
   const showToast = (msg, type = 'info') => {
     setToast({ msg, type })
@@ -118,19 +214,18 @@ export default function MemberHome() {
     fetchWod()
     fetchPbs(m.id)
     fetchLeaderboard()
-    checkTodayAttendance(m.id)
+    fetchAttendanceAndStreak(m.id)
     checkTodayScore(m.id)
+    fetchGoals(m.id)
   }, [])
 
-  // Detect current notification permission on mount
   useEffect(() => {
-  if (!('Notification' in window) || !('serviceWorker' in navigator)) {
-    setNotifStatus('unsupported')
-  } else if (Notification.permission === 'denied') {
-    setNotifStatus('denied')
-  }
-  // Remove the 'granted' check — let the button always attempt to save
-}, [])
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+      setNotifStatus('unsupported')
+    } else if (Notification.permission === 'denied') {
+      setNotifStatus('denied')
+    }
+  }, [])
 
   // ── Data fetchers ───────────────────────────────────────────────────────────
   const fetchWod = async () => {
@@ -168,57 +263,85 @@ export default function MemberHome() {
     }
   }
 
-  const checkTodayAttendance = async (memberId) => {
+  const fetchAttendanceAndStreak = async (memberId) => {
+    const thirtyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    const { data } = await supabase.from('workout_logs')
+      .select('logged_at')
+      .eq('member_id', memberId)
+      .gte('logged_at', thirtyDaysAgo)
+      .order('logged_at', { ascending: false })
+
+    if (!data) return
+
+    const dateSet = new Set(data.map(d => d.logged_at))
+    setAttendedDates(dateSet)
+    setTotalSessions(dateSet.size)
+
+    // Check today's attendance
     const today = new Date().toISOString().split('T')[0]
-    const { data } = await supabase.from('workout_logs').select('id')
-      .eq('member_id', memberId).eq('logged_at', today).limit(1)
-    if (data && data.length > 0) setCheckedIn(true)
+    if (dateSet.has(today)) setCheckedIn(true)
+
+    // Calculate current streak (consecutive days ending today or yesterday)
+    let current = 0
+    const check = new Date()
+    // If not checked in today, start from yesterday
+    if (!dateSet.has(today)) check.setDate(check.getDate() - 1)
+
+    while (true) {
+      const d = check.toISOString().split('T')[0]
+      if (!dateSet.has(d)) break
+      current++
+      check.setDate(check.getDate() - 1)
+      if (current > 365) break
+    }
+    setStreak(current)
+
+    // Calculate longest streak in the data
+    const allDates = [...dateSet].sort()
+    let longest = 0, run = 0
+    for (let i = 0; i < allDates.length; i++) {
+      if (i === 0) { run = 1; continue }
+      const prev = new Date(allDates[i - 1]), curr = new Date(allDates[i])
+      const diff = (curr - prev) / (1000 * 60 * 60 * 24)
+      run = diff === 1 ? run + 1 : 1
+      if (run > longest) longest = run
+    }
+    setLongestStreak(Math.max(longest, current))
   }
 
   const checkTodayScore = async (memberId) => {
     const today = new Date().toISOString().split('T')[0]
     const { data } = await supabase.from('workout_logs').select('id')
       .eq('member_id', memberId).eq('logged_at', today)
-      .not('rounds', 'is', null)
-      .limit(1)
+      .not('rounds', 'is', null).limit(1)
     if (data && data.length > 0) setScoredToday(true)
+  }
+
+  const fetchGoals = async (memberId) => {
+    const { data } = await supabase.from('member_goals').select('*')
+      .eq('member_id', memberId).order('created_at', { ascending: false })
+    if (data) setGoals(data)
   }
 
   // ── Actions ─────────────────────────────────────────────────────────────────
   const handleCheckIn = async () => {
     if (checkedIn || !member) return
     setCheckingIn(true)
+    const today = new Date().toISOString().split('T')[0]
     const { error } = await supabase.from('workout_logs').insert([{
       member_id: member.id, member_name: member.full_name,
       wod_name: wod?.name || 'Check-in', workout_type: wod?.type || 'Check-in',
-      logged_at: new Date().toISOString().split('T')[0]
-    }])
-    if (!error) { setCheckedIn(true); showToast('🔥 Checked in! Let\'s get it!', 'success'); fetchLeaderboard() }
-    else showToast('Something went wrong. Try again.', 'error')
-    setCheckingIn(false)
-  }
-
-  const handleLogScore = async () => {
-    if (!member || !wod) return
-    setSavingScore(true)
-    const totalSecs = (parseInt(scoreForm.time_minutes || 0) * 60) + parseInt(scoreForm.time_seconds || 0)
-    const { error } = await supabase.from('workout_logs').insert([{
-      member_id: member.id, member_name: member.full_name,
-      wod_name: wod.name || wod.type, workout_type: wod.type,
-      rounds: parseInt(scoreForm.rounds) || null,
-      time_seconds: totalSecs || null,
-      weight_kg: parseFloat(scoreForm.weight_kg) || null,
-      reps: parseInt(scoreForm.reps) || null,
-      notes: scoreForm.notes || null,
-      logged_at: new Date().toISOString().split('T')[0]
+      logged_at: today
     }])
     if (!error) {
-      showToast('💪 Score logged!', 'success')
-      setShowScoreForm(false)
-      setScoredToday(true)
-      setScoreForm({ rounds: '', time_minutes: '', time_seconds: '', weight_kg: '', reps: '', notes: '' })
-    } else showToast('Something went wrong.', 'error')
-    setSavingScore(false)
+      setCheckedIn(true)
+      setAttendedDates(prev => new Set([...prev, today]))
+      setStreak(prev => prev + 1)
+      setTotalSessions(prev => prev + 1)
+      showToast('🔥 Checked in! Let\'s get it!', 'success')
+      fetchLeaderboard()
+    } else showToast('Something went wrong. Try again.', 'error')
+    setCheckingIn(false)
   }
 
   const handleSavePB = async () => {
@@ -226,17 +349,17 @@ export default function MemberHome() {
     const movement = pbForm.movement === 'custom' ? pbForm.custom_movement : pbForm.movement
     if (!movement || !pbForm.value) { showToast('⚠ Fill in movement and value', 'error'); return }
     setSavingPB(true)
-    const numVal = parseFloat(pbForm.value)
+    const numVal = pbForm.pb_type === 'Time' ? null : parseFloat(pbForm.value)
     await supabase.from('pb_history').insert([{
       member_id: member.id, member_name: member.full_name,
       movement, pb_type: pbForm.pb_type,
-      value: pbForm.value, value_numeric: numVal || null,
+      value: pbForm.value, value_numeric: numVal ?? null,
       achieved_at: new Date().toISOString().split('T')[0]
     }])
     const { error } = await supabase.from('personal_bests').upsert([{
       member_id: member.id, member_name: member.full_name,
       movement, pb_type: pbForm.pb_type,
-      value: pbForm.value, value_numeric: numVal || null,
+      value: pbForm.value, value_numeric: numVal ?? null,
       achieved_at: new Date().toISOString().split('T')[0],
       updated_at: new Date().toISOString()
     }], { onConflict: 'member_id,movement' })
@@ -268,7 +391,40 @@ export default function MemberHome() {
     fetchProgress(movement)
   }
 
-  // ── Push notifications ──────────────────────────────────────────────────────
+  const handleSaveGoal = async () => {
+    if (!member || !goalForm.movement || !goalForm.target_value) {
+      showToast('⚠ Fill in movement and target', 'error'); return
+    }
+    setSavingGoal(true)
+    const numVal = goalForm.pb_type === 'Time' ? null : parseFloat(goalForm.target_value)
+    const { error } = await supabase.from('member_goals').insert([{
+      member_id: member.id,
+      member_name: member.full_name,
+      movement: goalForm.movement,
+      pb_type: goalForm.pb_type,
+      target_value: goalForm.target_value,
+      target_numeric: numVal ?? null,
+      created_at: new Date().toISOString()
+    }])
+    if (!error) {
+      showToast('🎯 Goal set!', 'success')
+      setShowGoalForm(false)
+      setGoalForm({ movement: '', target_value: '', pb_type: 'Weight' })
+      fetchGoals(member.id)
+    } else {
+      // Table might not exist yet — show graceful message
+      showToast('Goal saved locally (DB table needed)', 'info')
+      setGoals(prev => [...prev, { ...goalForm, id: Date.now(), member_id: member.id }])
+      setShowGoalForm(false)
+    }
+    setSavingGoal(false)
+  }
+
+  const handleDeleteGoal = async (goalId) => {
+    await supabase.from('member_goals').delete().eq('id', goalId)
+    setGoals(prev => prev.filter(g => g.id !== goalId))
+  }
+
   const enableNotifications = async () => {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
       setNotifStatus('unsupported'); return
@@ -277,21 +433,17 @@ export default function MemberHome() {
     try {
       const registration = await navigator.serviceWorker.register('/sw.js')
       await navigator.serviceWorker.ready
-
       const permission = await Notification.requestPermission()
       if (permission !== 'granted') { setNotifStatus('denied'); return }
-
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(import.meta.env.VITE_VAPID_PUBLIC_KEY)
       })
-
       const { error } = await supabase.from('push_subscriptions').upsert({
-       member_id: (() => { const s = sessionStorage.getItem('baby_member'); return s ? JSON.parse(s).id : member?.id })(),
+        member_id: (() => { const s = sessionStorage.getItem('baby_member'); return s ? JSON.parse(s).id : member?.id })(),
         subscription: JSON.stringify(subscription),
         updated_at: new Date().toISOString()
       }, { onConflict: 'member_id' })
-
       if (error) throw error
       setNotifStatus('granted')
       showToast('🔔 Notifications enabled!', 'success')
@@ -306,7 +458,15 @@ export default function MemberHome() {
 
   // ── Derived ─────────────────────────────────────────────────────────────────
   const firstName = member?.full_name?.split(' ')[0] || 'Athlete'
-  const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })
+  const todayLabel = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })
+
+  // Group PBs by category
+  const pbsByCategory = {}
+  pbs.forEach(pb => {
+    const cat = MOVEMENT_CATEGORY[pb.movement] || '⚡ Other'
+    if (!pbsByCategory[cat]) pbsByCategory[cat] = []
+    pbsByCategory[cat].push(pb)
+  })
 
   const tabs = [
     { id: 'home', label: 'Home', icon: '🏠' },
@@ -344,7 +504,7 @@ export default function MemberHome() {
       {/* Header */}
       <div style={{ padding: '48px 20px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 2 }}>{today}</div>
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 2 }}>{todayLabel}</div>
           <div style={{ fontFamily: "'Bebas Neue'", fontSize: 32, letterSpacing: 2, lineHeight: 1 }}>HEY {firstName.toUpperCase()} 👊</div>
         </div>
         <button onClick={handleLogout} style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '8px 14px', color: 'rgba(255,255,255,0.5)', fontSize: 12, cursor: 'pointer' }}>Sign Out</button>
@@ -355,6 +515,18 @@ export default function MemberHome() {
         {/* ── HOME TAB ── */}
         {tab === 'home' && (
           <>
+            {/* Streak card */}
+            {streak > 0 && (
+              <div style={{ ...card, marginBottom: 14, background: streak >= 7 ? 'rgba(255,100,0,0.08)' : 'rgba(255,255,255,0.04)', border: `1px solid ${streak >= 7 ? 'rgba(255,100,0,0.3)' : 'rgba(255,255,255,0.08)'}` }}>
+                <StreakBar streak={streak} longestStreak={longestStreak} />
+                <AttendanceDots attendedDates={attendedDates} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>← 28 days</div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>{totalSessions} total sessions</div>
+                </div>
+              </div>
+            )}
+
             {/* Check-in card */}
             <div style={{ ...card, marginBottom: 14, background: checkedIn ? 'rgba(0,200,100,0.08)' : accentDim, border: `1px solid ${checkedIn ? 'rgba(0,200,100,0.25)' : 'rgba(255,100,0,0.3)'}` }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -395,6 +567,36 @@ export default function MemberHome() {
               ) : <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14 }}>No WOD posted yet. Check back soon! 💤</div>}
             </div>
 
+            {/* Goals preview */}
+            {goals.length > 0 && (
+              <div style={{ ...card, marginBottom: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, color: '#00c8ff', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600 }}>My Goals 🎯</div>
+                  <button onClick={() => setTab('pbs')} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', fontSize: 12, cursor: 'pointer' }}>Manage →</button>
+                </div>
+                {goals.slice(0, 3).map((goal, i) => {
+                  const pb = pbs.find(p => p.movement === goal.movement)
+                  const current = pb ? parseFloat(pb.value_numeric ?? pb.value) : 0
+                  const target = parseFloat(goal.target_numeric ?? goal.target_value) || 1
+                  const pct = Math.min(100, Math.round((current / target) * 100))
+                  return (
+                    <div key={i} style={{ marginBottom: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500 }}>{goal.movement}</div>
+                        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>
+                          {pb ? pb.value : '–'} / {goal.target_value} {goal.pb_type === 'Weight' ? 'kg' : goal.pb_type === 'Reps' ? 'reps' : ''}
+                        </div>
+                      </div>
+                      <div style={{ background: 'rgba(255,255,255,0.07)', borderRadius: 99, height: 6, overflow: 'hidden' }}>
+                        <div style={{ width: `${pct}%`, height: '100%', background: pct >= 100 ? '#00c864' : '#00c8ff', borderRadius: 99, transition: 'width 0.5s' }} />
+                      </div>
+                      <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginTop: 3, textAlign: 'right' }}>{pct}%</div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
             {/* PBs preview */}
             <div style={{ ...card, marginBottom: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -406,7 +608,7 @@ export default function MemberHome() {
                   {pbs.slice(0, 4).map((pb, i) => (
                     <div key={i} style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: '10px 12px' }}>
                       <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 2 }}>{pb.movement}</div>
-                      <div style={{ fontSize: 16, fontWeight: 600 }}>{pb.value}<span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginLeft: 2 }}>{pb.pb_type === 'Weight' ? 'kg' : ''}</span></div>
+                      <div style={{ fontSize: 16, fontWeight: 600 }}>{pb.value}<span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginLeft: 2 }}>{pb.pb_type === 'Weight' ? 'kg' : pb.pb_type === 'Reps' ? ' reps' : ''}</span></div>
                     </div>
                   ))}
                 </div>
@@ -429,29 +631,16 @@ export default function MemberHome() {
               {leaderboard.length === 0 && <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 13 }}>Check in to appear on the board! 🏅</div>}
             </div>
 
-            {/* ── NOTIFICATIONS CARD ── */}
+            {/* Notifications card */}
             <div style={{ ...card, marginBottom: 14 }}>
               <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 10 }}>Push Notifications</div>
-              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 12 }}>
-                Get notified when today's WOD is posted 🔔
-              </div>
-              <button
-                onClick={enableNotifications}
-                disabled={notifStatus !== 'idle'}
-                style={{
-                  width: '100%', background: notifBg,
-                  border: `1px solid ${notifStatus === 'granted' ? 'rgba(0,200,100,0.3)' : notifStatus === 'denied' ? 'rgba(255,50,50,0.3)' : 'rgba(255,255,255,0.1)'}`,
-                  borderRadius: 12, padding: '13px', color: '#fff', fontSize: 14,
-                  fontWeight: 600, cursor: notifStatus === 'idle' ? 'pointer' : 'default',
-                  fontFamily: "'DM Sans'", opacity: notifStatus === 'loading' ? 0.6 : 1,
-                  transition: 'opacity 0.2s'
-                }}>
+              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 12 }}>Get notified when today's WOD is posted 🔔</div>
+              <button onClick={enableNotifications} disabled={notifStatus !== 'idle'}
+                style={{ width: '100%', background: notifBg, border: `1px solid ${notifStatus === 'granted' ? 'rgba(0,200,100,0.3)' : notifStatus === 'denied' ? 'rgba(255,50,50,0.3)' : 'rgba(255,255,255,0.1)'}`, borderRadius: 12, padding: '13px', color: '#fff', fontSize: 14, fontWeight: 600, cursor: notifStatus === 'idle' ? 'pointer' : 'default', fontFamily: "'DM Sans'", opacity: notifStatus === 'loading' ? 0.6 : 1 }}>
                 {notifLabel}
               </button>
               {notifStatus === 'denied' && (
-                <div style={{ fontSize: 12, color: 'rgba(255,100,100,0.7)', marginTop: 8, textAlign: 'center' }}>
-                  Open browser settings → allow notifications for this site.
-                </div>
+                <div style={{ fontSize: 12, color: 'rgba(255,100,100,0.7)', marginTop: 8, textAlign: 'center' }}>Open browser settings → allow notifications for this site.</div>
               )}
             </div>
           </>
@@ -488,7 +677,6 @@ export default function MemberHome() {
                 </>
               ) : <div style={{ color: 'rgba(255,255,255,0.3)', textAlign: 'center', padding: '40px 0' }}>No WOD posted yet 💤</div>}
             </div>
-
           </>
         )}
 
@@ -496,6 +684,8 @@ export default function MemberHome() {
         {tab === 'progress' && (
           <div>
             <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 14 }}>Progress Tracker 📈</div>
+
+            {/* Category filter */}
             <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 12, scrollbarWidth: 'none' }}>
               {Object.keys(MOVEMENTS).map(cat => (
                 <button key={cat} onClick={() => setProgressCategory(cat)}
@@ -504,6 +694,7 @@ export default function MemberHome() {
                 </button>
               ))}
             </div>
+
             <div style={{ ...card, marginBottom: 14 }}>
               <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 10 }}>Select Movement</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
@@ -530,36 +721,59 @@ export default function MemberHome() {
                 ) : (
                   <>
                     <div style={{ ...card, marginBottom: 14 }}>
-                      <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 4 }}>Personal Best — {progressMovement}</div>
-                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginBottom: 12 }}>Weight / Value over time</div>
-                      {progressData.length > 0 ? (
-                        <>
-                          <MiniLineChart data={progressData} color={accent} />
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
-                            <div style={{ textAlign: 'center' }}>
-                              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>First</div>
-                              <div style={{ fontSize: 16, fontWeight: 700, color: 'rgba(255,255,255,0.6)' }}>{progressData[0]?.value}</div>
+                      <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 2 }}>Personal Best — {progressMovement}</div>
+                      {(() => {
+                        const isTime = progressData.length > 0 && progressData[0].pb_type === 'Time'
+                        return (
+                          <>
+                            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginBottom: 12 }}>
+                              {isTime ? 'Time improving (lower = better) ⬇️' : 'Value improving over time ⬆️'}
                             </div>
-                            <div style={{ textAlign: 'center' }}>
-                              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>Current PB</div>
-                              <div style={{ fontSize: 22, fontWeight: 700, color: accent }}>{progressData[progressData.length - 1]?.value}</div>
-                            </div>
-                            <div style={{ textAlign: 'center' }}>
-                              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>Entries</div>
-                              <div style={{ fontSize: 16, fontWeight: 700, color: 'rgba(255,255,255,0.6)' }}>{progressData.length}</div>
-                            </div>
-                          </div>
-                        </>
-                      ) : (
-                        <div style={{ color: 'rgba(255,255,255,0.3)', textAlign: 'center', padding: '20px 0', fontSize: 13 }}>
-                          No PB data yet for {progressMovement}.<br />Log your first PB in the My PBs tab! 💪
-                        </div>
-                      )}
+                            {progressData.length > 0 ? (
+                              <>
+                                <MiniLineChart data={progressData} color={accent} isTime={isTime} />
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
+                                  <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>First</div>
+                                    <div style={{ fontSize: 16, fontWeight: 700, color: 'rgba(255,255,255,0.6)' }}>{progressData[0]?.value}</div>
+                                  </div>
+                                  <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>Best</div>
+                                    <div style={{ fontSize: 22, fontWeight: 700, color: accent }}>{progressData[progressData.length - 1]?.value}</div>
+                                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>
+                                      {progressData[0].pb_type === 'Weight' ? 'kg' : progressData[0].pb_type === 'Reps' ? 'reps' : ''}
+                                    </div>
+                                  </div>
+                                  <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>Entries</div>
+                                    <div style={{ fontSize: 16, fontWeight: 700, color: 'rgba(255,255,255,0.6)' }}>{progressData.length}</div>
+                                  </div>
+                                </div>
+                                {/* Entry list */}
+                                <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                  {[...progressData].reverse().slice(0, 5).map((d, i) => (
+                                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
+                                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>
+                                        {new Date(d.achieved_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                                      </div>
+                                      <div style={{ fontSize: 14, fontWeight: 600, color: i === 0 ? accent : '#fff' }}>{d.value}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </>
+                            ) : (
+                              <div style={{ color: 'rgba(255,255,255,0.3)', textAlign: 'center', padding: '20px 0', fontSize: 13 }}>
+                                No PB data yet for {progressMovement}.<br />Log your first PB in the My PBs tab! 💪
+                              </div>
+                            )}
+                          </>
+                        )
+                      })()}
                     </div>
 
                     <div style={{ ...card, marginBottom: 14 }}>
                       <div style={{ fontSize: 11, color: '#00c8ff', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 4 }}>WOD Score History</div>
-                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginBottom: 12 }}>Rounds/Reps logged over time</div>
+                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginBottom: 12 }}>Rounds / Reps over time</div>
                       {wodScoreHistory.length >= 2 ? (
                         <>
                           <MiniLineChart data={wodScoreHistory.map(s => ({ ...s, value_numeric: s.rounds || s.reps || 0 }))} color="#00c8ff" />
@@ -586,6 +800,7 @@ export default function MemberHome() {
                 )}
               </>
             )}
+
             {!progressMovement && (
               <div style={{ ...card, textAlign: 'center', padding: '40px 20px', color: 'rgba(255,255,255,0.3)' }}>
                 <div style={{ fontSize: 40, marginBottom: 10 }}>📈</div>
@@ -600,12 +815,80 @@ export default function MemberHome() {
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
               <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600 }}>My Personal Bests</div>
-              <button onClick={() => setShowPBForm(!showPBForm)}
-                style={{ background: showPBForm ? 'rgba(255,255,255,0.06)' : accent, border: 'none', borderRadius: 10, padding: '8px 16px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
-                {showPBForm ? '✕ Cancel' : '+ Add PB'}
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setShowGoalForm(!showGoalForm)}
+                  style={{ background: showGoalForm ? 'rgba(0,200,100,0.15)' : 'rgba(0,200,100,0.1)', border: '1px solid rgba(0,200,100,0.25)', borderRadius: 10, padding: '7px 12px', color: 'rgba(0,220,100,0.9)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
+                  🎯 Goal
+                </button>
+                <button onClick={() => setShowPBForm(!showPBForm)}
+                  style={{ background: showPBForm ? 'rgba(255,255,255,0.06)' : accent, border: 'none', borderRadius: 10, padding: '7px 14px', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
+                  {showPBForm ? '✕ Cancel' : '+ Add PB'}
+                </button>
+              </div>
             </div>
 
+            {/* Goal form */}
+            {showGoalForm && (
+              <div style={{ ...card, marginBottom: 14, border: '1px solid rgba(0,200,100,0.2)' }}>
+                <div style={{ fontSize: 11, color: 'rgba(0,220,100,0.9)', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 14 }}>Set a Goal 🎯</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <input style={inputStyle} placeholder="Movement (e.g. Back Squat)" value={goalForm.movement}
+                    onChange={e => setGoalForm(f => ({ ...f, movement: e.target.value }))} />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                    {['Weight', 'Reps', 'Time'].map(t => (
+                      <button key={t} onClick={() => setGoalForm(f => ({ ...f, pb_type: t }))}
+                        style={{ background: goalForm.pb_type === t ? 'rgba(0,200,100,0.12)' : 'rgba(255,255,255,0.04)', border: `1px solid ${goalForm.pb_type === t ? 'rgba(0,200,100,0.3)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 10, padding: '9px 8px', color: goalForm.pb_type === t ? 'rgba(0,220,100,0.9)' : 'rgba(255,255,255,0.5)', fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
+                        {t === 'Weight' ? '⚖️ kg' : t === 'Reps' ? '🔁 Reps' : '⏱️ Time'}
+                      </button>
+                    ))}
+                  </div>
+                  <input style={inputStyle} placeholder={goalForm.pb_type === 'Weight' ? 'Target kg, e.g. 100' : goalForm.pb_type === 'Reps' ? 'Target reps, e.g. 20' : 'Target time, e.g. 25:00'}
+                    value={goalForm.target_value} onChange={e => setGoalForm(f => ({ ...f, target_value: e.target.value }))} />
+                  <button onClick={handleSaveGoal} disabled={savingGoal}
+                    style={{ background: 'rgba(0,200,100,0.15)', border: '1px solid rgba(0,200,100,0.3)', borderRadius: 12, padding: '12px', color: 'rgba(0,220,100,0.9)', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
+                    {savingGoal ? 'Saving...' : '🎯 Set Goal'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Active goals */}
+            {goals.length > 0 && (
+              <div style={{ ...card, marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: 'rgba(0,220,100,0.8)', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>Active Goals</div>
+                {goals.map((goal, i) => {
+                  const pb = pbs.find(p => p.movement === goal.movement)
+                  const current = pb ? parseFloat(pb.value_numeric ?? pb.value) : 0
+                  const target = parseFloat(goal.target_numeric ?? goal.target_value) || 1
+                  const pct = Math.min(100, Math.round((current / target) * 100))
+                  const done = pct >= 100
+                  return (
+                    <div key={i} style={{ marginBottom: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: done ? 'rgba(0,220,100,0.9)' : '#fff' }}>
+                          {done ? '✅ ' : '🎯 '}{goal.movement}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>
+                            {pb ? pb.value : '–'} → {goal.target_value}
+                          </div>
+                          <button onClick={() => handleDeleteGoal(goal.id)}
+                            style={{ background: 'none', border: 'none', color: 'rgba(255,80,80,0.5)', fontSize: 14, cursor: 'pointer', padding: '0 4px' }}>✕</button>
+                        </div>
+                      </div>
+                      <div style={{ background: 'rgba(255,255,255,0.07)', borderRadius: 99, height: 8 }}>
+                        <div style={{ width: `${pct}%`, height: '100%', background: done ? '#00c864' : 'linear-gradient(90deg, #00c8ff, #00c864)', borderRadius: 99, transition: 'width 0.5s' }} />
+                      </div>
+                      <div style={{ fontSize: 10, color: done ? 'rgba(0,220,100,0.7)' : 'rgba(255,255,255,0.3)', marginTop: 3, textAlign: 'right' }}>
+                        {done ? 'GOAL ACHIEVED! 🏆' : `${pct}% there`}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* PB form */}
             {showPBForm && (
               <div style={{ ...card, marginBottom: 14 }}>
                 <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 14 }}>Log Personal Best</div>
@@ -645,7 +928,7 @@ export default function MemberHome() {
                   </div>
                   <div>
                     <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>
-                      {pbForm.pb_type === 'Weight' ? 'Weight (kg)' : pbForm.pb_type === 'Reps' ? 'Reps' : 'Time (e.g. 4:32)'}
+                      {pbForm.pb_type === 'Weight' ? 'Weight (kg)' : pbForm.pb_type === 'Reps' ? 'Reps' : 'Time (mm:ss e.g. 4:32)'}
                     </div>
                     <input style={inputStyle} type={pbForm.pb_type === 'Time' ? 'text' : 'number'}
                       placeholder={pbForm.pb_type === 'Weight' ? 'e.g. 80' : pbForm.pb_type === 'Reps' ? 'e.g. 25' : 'e.g. 4:32'}
@@ -659,20 +942,28 @@ export default function MemberHome() {
               </div>
             )}
 
-            {pbs.length > 0 ? pbs.map((pb, i) => (
-              <div key={i} style={{ ...card, display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>{pb.movement}</div>
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 2 }}>
-                    {pb.pb_type} • {pb.achieved_at ? new Date(pb.achieved_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
-                  </div>
+            {/* PBs grouped by category */}
+            {pbs.length > 0 ? (
+              Object.entries(pbsByCategory).map(([cat, catPbs]) => (
+                <div key={cat} style={{ marginBottom: 6 }}>
+                  <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 8, paddingLeft: 4 }}>{cat}</div>
+                  {catPbs.map((pb, i) => (
+                    <div key={i} style={{ ...card, display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 600 }}>{pb.movement}</div>
+                        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 2 }}>
+                          {pb.pb_type} • {pb.achieved_at ? new Date(pb.achieved_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 22, fontWeight: 700, color: accent }}>{pb.value}</div>
+                        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>{pb.pb_type === 'Weight' ? 'kg' : pb.pb_type === 'Time' ? '' : 'reps'}</div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 22, fontWeight: 700, color: accent }}>{pb.value}</div>
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>{pb.pb_type === 'Weight' ? 'kg' : pb.pb_type === 'Time' ? '' : 'reps'}</div>
-                </div>
-              </div>
-            )) : !showPBForm && (
+              ))
+            ) : !showPBForm && !showGoalForm && (
               <div style={{ ...card, textAlign: 'center', padding: '40px 20px', color: 'rgba(255,255,255,0.3)' }}>
                 <div style={{ fontSize: 40, marginBottom: 10 }}>🏋️</div>
                 No personal bests yet.<br />Tap "+ Add PB" to start tracking!
@@ -681,7 +972,7 @@ export default function MemberHome() {
           </div>
         )}
 
-        {/* ── BOARD TAB — WOD Leaderboard ── */}
+        {/* ── BOARD TAB ── */}
         {tab === 'board' && (
           <BoardTab member={member} navigate={navigate} accent={accent} accentDim={accentDim} card={card} />
         )}

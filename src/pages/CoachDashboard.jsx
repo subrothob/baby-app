@@ -1,10 +1,41 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 
 const accent = '#ff6400'
 const accentDim = 'rgba(255,100,0,0.12)'
 const card = { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: '16px 18px' }
+
+// ── 7-day attendance bar chart ────────────────────────────────────────────────
+function AttendanceBarChart({ data7 }) {
+  // data7: array of { date, label, count } for last 7 days
+  const max = Math.max(...data7.map(d => d.count), 1)
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', height: 70, padding: '0 4px' }}>
+      {data7.map((d, i) => {
+        const isToday = i === data7.length - 1
+        const pct = (d.count / max) * 100
+        return (
+          <div key={d.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: isToday ? accent : 'rgba(255,255,255,0.5)' }}>
+              {d.count > 0 ? d.count : ''}
+            </div>
+            <div style={{ width: '100%', height: 44, display: 'flex', alignItems: 'flex-end' }}>
+              <div style={{
+                width: '100%', height: `${Math.max(pct, d.count > 0 ? 8 : 3)}%`,
+                minHeight: d.count > 0 ? 6 : 2,
+                background: isToday ? accent : d.count > 0 ? 'rgba(255,100,0,0.5)' : 'rgba(255,255,255,0.08)',
+                borderRadius: '4px 4px 2px 2px',
+                transition: 'height 0.4s'
+              }} />
+            </div>
+            <div style={{ fontSize: 9, color: isToday ? accent : 'rgba(255,255,255,0.3)', fontWeight: isToday ? 600 : 400 }}>{d.label}</div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 export default function CoachDashboard() {
   const navigate = useNavigate()
@@ -15,6 +46,9 @@ export default function CoachDashboard() {
   const [scheduledWods, setScheduledWods] = useState([])
   const [loading, setLoading] = useState(false)
   const [toast, setToast] = useState(null)
+  const [attendanceTrend, setAttendanceTrend] = useState([])
+  const [absenteesToday, setAbsenteesToday] = useState([])
+  const [memberStreaks, setMemberStreaks] = useState({})
 
   // ── Notify state ──────────────────────────────────────────
   const [notifyModal, setNotifyModal] = useState(false)
@@ -42,6 +76,7 @@ export default function CoachDashboard() {
     fetchMembers()
     fetchTodayCheckins()
     fetchScheduledWods()
+    fetchAttendanceTrend()
   }, [])
 
   const fetchMembers = async () => {
@@ -57,6 +92,62 @@ export default function CoachDashboard() {
       .eq('logged_at', today)
       .order('logged_at', { ascending: false })
     if (data) setCheckins(data)
+  }
+
+  const fetchAttendanceTrend = async () => {
+    const sevenDaysAgo = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    const { data } = await supabase.from('workout_logs')
+      .select('member_id, logged_at')
+      .gte('logged_at', sevenDaysAgo)
+
+    // Build 7-day array
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(Date.now() - (6 - i) * 24 * 60 * 60 * 1000)
+      return {
+        date: d.toISOString().split('T')[0],
+        label: i === 6 ? 'Today' : d.toLocaleDateString('en-IN', { weekday: 'short' }).slice(0, 2),
+        count: 0
+      }
+    })
+
+    if (data) {
+      // Count unique members per day
+      const dayMap = {}
+      data.forEach(row => {
+        if (!dayMap[row.logged_at]) dayMap[row.logged_at] = new Set()
+        dayMap[row.logged_at].add(row.member_id)
+      })
+      days.forEach(d => { d.count = dayMap[d.date]?.size || 0 })
+
+      // Member streaks (last 30 days)
+      const thirtyAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      const { data: logs30 } = await supabase.from('workout_logs')
+        .select('member_id, logged_at').gte('logged_at', thirtyAgo)
+
+      if (logs30) {
+        const memberDays = {}
+        logs30.forEach(r => {
+          if (!memberDays[r.member_id]) memberDays[r.member_id] = new Set()
+          memberDays[r.member_id].add(r.logged_at)
+        })
+        const streaks = {}
+        Object.entries(memberDays).forEach(([mid, dateSet]) => {
+          const today = new Date().toISOString().split('T')[0]
+          let s = 0
+          const check = new Date()
+          if (!dateSet.has(today)) check.setDate(check.getDate() - 1)
+          while (true) {
+            const d = check.toISOString().split('T')[0]
+            if (!dateSet.has(d)) break
+            s++; check.setDate(check.getDate() - 1)
+            if (s > 30) break
+          }
+          streaks[mid] = s
+        })
+        setMemberStreaks(streaks)
+      }
+    }
+    setAttendanceTrend(days)
   }
 
   const fetchScheduledWods = async () => {
@@ -209,7 +300,7 @@ export default function CoachDashboard() {
 
       <div style={{ padding: '0 20px' }}>
         {/* Stats */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 12 }}>
           {[
             { label: 'Members', val: members.length, icon: '👥' },
             { label: "Today's Check-ins", val: checkins.length, icon: '✅' },
@@ -222,6 +313,41 @@ export default function CoachDashboard() {
             </div>
           ))}
         </div>
+
+        {/* 7-day attendance chart */}
+        {attendanceTrend.length > 0 && (
+          <div style={{ ...card, marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600 }}>Attendance This Week</div>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>
+                Avg {Math.round(attendanceTrend.reduce((s, d) => s + d.count, 0) / 7)}/day
+              </div>
+            </div>
+            <AttendanceBarChart data7={attendanceTrend} />
+          </div>
+        )}
+
+        {/* Absentees alert */}
+        {(() => {
+          const checkedInIds = new Set(checkins.map(c => c.member_id))
+          const absentees = members.filter(m => !checkedInIds.has(m.id))
+          if (absentees.length === 0 || checkins.length === 0) return null
+          return (
+            <div style={{ ...card, marginBottom: 16, background: 'rgba(255,150,0,0.06)', border: '1px solid rgba(255,150,0,0.2)' }}>
+              <div style={{ fontSize: 11, color: 'rgba(255,180,0,0.8)', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 8 }}>
+                Not In Yet Today ({absentees.length})
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {absentees.slice(0, 8).map((m, i) => (
+                  <span key={i} style={{ background: 'rgba(255,150,0,0.1)', border: '1px solid rgba(255,150,0,0.2)', borderRadius: 99, padding: '3px 10px', fontSize: 11, color: 'rgba(255,180,0,0.8)' }}>
+                    {m.full_name.split(' ')[0]}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
+
 
         {/* POST WOD TAB */}
         {tab === 'post' && (
@@ -374,16 +500,25 @@ export default function CoachDashboard() {
             <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>All Members ({members.length})</div>
             {members.map((m, i) => {
               const checkedInToday = checkins.some(c => c.member_id === m.id)
+              const streak = memberStreaks[m.id] || 0
+              const inactive = streak === 0
               return (
-                <div key={i} style={{ ...card, display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
-                  <div style={{ width: 38, height: 38, borderRadius: '50%', background: checkedInToday ? 'rgba(0,200,100,0.15)' : 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700, color: checkedInToday ? 'rgba(0,220,100,0.9)' : 'rgba(255,255,255,0.5)', flexShrink: 0 }}>
+                <div key={i} style={{ ...card, display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, border: inactive ? '1px solid rgba(255,150,0,0.15)' : '1px solid rgba(255,255,255,0.08)' }}>
+                  <div style={{ width: 38, height: 38, borderRadius: '50%', background: checkedInToday ? 'rgba(0,200,100,0.15)' : inactive ? 'rgba(255,150,0,0.08)' : 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700, color: checkedInToday ? 'rgba(0,220,100,0.9)' : 'rgba(255,255,255,0.5)', flexShrink: 0 }}>
                     {m.full_name?.charAt(0).toUpperCase()}
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 14, fontWeight: 600 }}>{m.full_name}</div>
-                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>{m.mobile}</div>
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 1 }}>{m.mobile}</div>
                   </div>
-                  {checkedInToday && <div style={{ background: 'rgba(0,200,100,0.15)', color: 'rgba(0,220,100,0.9)', fontSize: 11, padding: '3px 8px', borderRadius: 99, fontWeight: 600 }}>Today ✓</div>}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                    {checkedInToday && <div style={{ background: 'rgba(0,200,100,0.15)', color: 'rgba(0,220,100,0.9)', fontSize: 10, padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>Today ✓</div>}
+                    {streak > 0 ? (
+                      <div style={{ fontSize: 10, color: streak >= 7 ? accent : 'rgba(255,255,255,0.4)', fontWeight: 500 }}>🔥 {streak}d streak</div>
+                    ) : (
+                      <div style={{ fontSize: 10, color: 'rgba(255,150,0,0.6)', fontWeight: 500 }}>⚠ Inactive</div>
+                    )}
+                  </div>
                 </div>
               )
             })}
