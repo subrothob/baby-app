@@ -161,6 +161,167 @@ function AttendanceDots({ attendedDates }) {
   )
 }
 
+// ── Board Tab — inline WOD leaderboard + weekly attendance board ──────────────
+function BoardTab({ member, navigate, accent, accentDim, card }) {
+  const [todayWod, setTodayWod] = useState(null)
+  const [results, setResults] = useState([])
+  const [weekBoard, setWeekBoard] = useState([])
+  const [filter, setFilter] = useState('all')
+  const [loading, setLoading] = useState(true)
+
+  const medals = ['🥇', '🥈', '🥉']
+  const rankColors = ['rgba(255,215,0,0.9)', 'rgba(192,192,192,0.9)', 'rgba(205,127,50,0.9)']
+  const rankBg = ['rgba(255,215,0,0.08)', 'rgba(192,192,192,0.06)', 'rgba(205,127,50,0.06)']
+  const rankBorder = ['rgba(255,215,0,0.2)', 'rgba(192,192,192,0.15)', 'rgba(205,127,50,0.15)']
+
+  useEffect(() => {
+    fetchData()
+    const interval = setInterval(fetchData, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const fetchData = async () => {
+    const today = new Date().toISOString().split('T')[0]
+    const { data: wod } = await supabase.from('wods').select('*')
+      .eq('scheduled_date', today).order('posted_at', { ascending: false }).limit(1).single()
+    if (wod) {
+      setTodayWod(wod)
+      const { data: res } = await supabase.from('wod_results').select('*').eq('wod_id', wod.id)
+      if (res) setResults(sortWodResults(res))
+    }
+    // Weekly attendance board
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    const { data: logs } = await supabase.from('workout_logs')
+      .select('member_id, member_name, logged_at').gte('logged_at', weekAgo)
+    if (logs) {
+      const counts = {}
+      logs.forEach(r => {
+        if (!counts[r.member_id]) counts[r.member_id] = { name: r.member_name || 'Unknown', days: new Set() }
+        counts[r.member_id].days.add(r.logged_at)
+      })
+      setWeekBoard(Object.values(counts).map(m => ({ name: m.name, count: m.days.size })).sort((a, b) => b.count - a.count).slice(0, 10))
+    }
+    setLoading(false)
+  }
+
+  function sortWodResults(res) {
+    if (!res.length) return res
+    const type = res[0].score_type
+    return [...res].sort((a, b) => {
+      if (type === 'time') {
+        const toSecs = v => { const [m, s] = (v || '0:0').split(':').map(Number); return m * 60 + s }
+        return toSecs(a.score_value) - toSecs(b.score_value)
+      }
+      if (type === 'rounds') {
+        const toTotal = v => { const [r, rp] = (v || '0').split('+').map(Number); return (r || 0) * 1000 + (rp || 0) }
+        return toTotal(b.score_value) - toTotal(a.score_value)
+      }
+      return parseFloat(b.score_value) - parseFloat(a.score_value)
+    })
+  }
+
+  const filtered = filter === 'all' ? results : results.filter(r => filter === 'rx' ? r.rx : !r.rx)
+
+  if (loading) return <div style={{ textAlign: 'center', padding: '60px 0', color: 'rgba(255,255,255,0.3)' }}>Loading board...</div>
+
+  return (
+    <div>
+      {/* Today's WOD leaderboard */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600 }}>Today's WOD Board 🏅</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(0,220,100,0.8)', boxShadow: '0 0 5px rgba(0,220,100,0.6)' }} />
+          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>LIVE</span>
+        </div>
+      </div>
+
+      {todayWod ? (
+        <>
+          <div style={{ ...card, marginBottom: 12 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: todayWod.conditioning ? 8 : 0 }}>
+              <span style={{ background: accentDim, color: accent, fontSize: 11, padding: '3px 10px', borderRadius: 99, fontWeight: 600 }}>{todayWod.type}</span>
+              {todayWod.name && <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>{todayWod.name}</span>}
+              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>{results.length} result{results.length !== 1 ? 's' : ''}</span>
+            </div>
+            {todayWod.conditioning && <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', lineHeight: 1.5 }}>{todayWod.conditioning.substring(0, 100)}{todayWod.conditioning.length > 100 ? '...' : ''}</div>}
+          </div>
+
+          {/* Filter pills */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+            {[{ id: 'all', label: `All (${results.length})` }, { id: 'rx', label: `RX (${results.filter(r => r.rx).length})` }, { id: 'scaled', label: `Scaled (${results.filter(r => !r.rx).length})` }].map(f => (
+              <button key={f.id} onClick={() => setFilter(f.id)}
+                style={{ background: filter === f.id ? accentDim : 'rgba(255,255,255,0.04)', border: `1px solid ${filter === f.id ? 'rgba(255,100,0,0.35)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 99, padding: '6px 14px', color: filter === f.id ? accent : 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: filter === f.id ? 600 : 400, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {filtered.length === 0 ? (
+            <div style={{ ...card, textAlign: 'center', padding: '40px 20px', color: 'rgba(255,255,255,0.25)', marginBottom: 14 }}>
+              <div style={{ fontSize: 40, marginBottom: 10 }}>🏁</div>
+              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>No results yet</div>
+              <button onClick={() => navigate('/log-result')} style={{ marginTop: 8, background: accent, border: 'none', borderRadius: 12, padding: '12px 22px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
+                Log My Result
+              </button>
+            </div>
+          ) : (
+            filtered.map((r, i) => {
+              const isMe = member && r.member_id === member.id
+              const isTop3 = i < 3
+              return (
+                <div key={r.id} style={{ background: isMe ? 'rgba(255,100,0,0.07)' : isTop3 ? rankBg[i] : 'rgba(255,255,255,0.03)', border: `1px solid ${isMe ? 'rgba(255,100,0,0.25)' : isTop3 ? rankBorder[i] : 'rgba(255,255,255,0.06)'}`, borderRadius: 14, padding: '13px 16px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 32, textAlign: 'center', flexShrink: 0 }}>
+                    {isTop3 ? <div style={{ fontSize: 22 }}>{medals[i]}</div> : <div style={{ fontFamily: "'Bebas Neue'", fontSize: 20, color: 'rgba(255,255,255,0.2)' }}>#{i + 1}</div>}
+                  </div>
+                  <div style={{ width: 36, height: 36, borderRadius: '50%', background: isTop3 ? rankBg[i] : 'rgba(255,255,255,0.06)', border: `1px solid ${isTop3 ? rankBorder[i] : 'rgba(255,255,255,0.1)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: isTop3 ? rankColors[i] : 'rgba(255,255,255,0.5)', flexShrink: 0 }}>
+                    {(r.member_name || '?').charAt(0).toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: isTop3 ? rankColors[i] : '#fff' }}>{r.member_name}</span>
+                      {isMe && <span style={{ background: accentDim, color: accent, fontSize: 9, padding: '2px 6px', borderRadius: 99, fontWeight: 700 }}>YOU</span>}
+                    </div>
+                    <span style={{ background: r.rx ? 'rgba(0,200,100,0.1)' : 'rgba(255,200,0,0.08)', color: r.rx ? 'rgba(0,220,100,0.8)' : 'rgba(255,200,0,0.7)', fontSize: 10, padding: '1px 6px', borderRadius: 99 }}>{r.rx ? 'RX' : 'Scaled'}</span>
+                  </div>
+                  <div style={{ fontFamily: "'Bebas Neue'", fontSize: isTop3 ? 26 : 20, color: isTop3 ? rankColors[i] : '#fff', letterSpacing: 1 }}>{r.score_value}</div>
+                </div>
+              )
+            })
+          )}
+
+          {member?.role === 'member' && !results.find(r => r.member_id === member.id) && (
+            <button onClick={() => navigate('/log-result')} style={{ width: '100%', background: accent, border: 'none', borderRadius: 14, padding: '14px', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: "'DM Sans'", marginTop: 4, marginBottom: 20 }}>
+              + Log My Result
+            </button>
+          )}
+        </>
+      ) : (
+        <div style={{ ...card, textAlign: 'center', padding: '30px 20px', color: 'rgba(255,255,255,0.3)', marginBottom: 20 }}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+          No WOD posted yet today. Check back later!
+        </div>
+      )}
+
+      {/* Weekly attendance leaderboard */}
+      <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 10 }}>This Week's Grind 💪</div>
+      {weekBoard.map((m, i) => (
+        <div key={i} style={{ ...card, display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+          <div style={{ width: 26, height: 26, borderRadius: '50%', background: i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : i === 2 ? '#CD7F32' : 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: i < 3 ? '#000' : 'rgba(255,255,255,0.4)', flexShrink: 0 }}>{i + 1}</div>
+          <div style={{ flex: 1, fontSize: 14 }}>{m.name}</div>
+          <div style={{ fontSize: 12, color: accent, fontWeight: 600 }}>{m.count} {m.count === 1 ? 'day' : 'days'}</div>
+          <div style={{ display: 'flex', gap: 2 }}>
+            {Array.from({ length: 7 }, (_, j) => (
+              <div key={j} style={{ width: 8, height: 8, borderRadius: 2, background: j < m.count ? accent : 'rgba(255,255,255,0.08)' }} />
+            ))}
+          </div>
+        </div>
+      ))}
+      {weekBoard.length === 0 && <div style={{ ...card, textAlign: 'center', padding: '30px', color: 'rgba(255,255,255,0.3)', fontSize: 13 }}>No check-ins this week yet. Be first! 🏅</div>}
+      <div style={{ textAlign: 'center', fontSize: 10, color: 'rgba(255,255,255,0.15)', marginTop: 16 }}>Board refreshes every 30 seconds</div>
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function MemberHome() {
   const navigate = useNavigate()
