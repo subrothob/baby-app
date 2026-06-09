@@ -503,14 +503,20 @@ export default function CoachDashboard() {
         {/* SCHEDULE TAB */}
         {tab === 'schedule' && (() => {
           const CLASS_COLORS = {
-            'CrossFit': { bg: 'rgba(255,100,0,0.12)', border: 'rgba(255,100,0,0.35)', text: '#ff6400' },
-            'Strength': { bg: 'rgba(255,200,0,0.1)',  border: 'rgba(255,200,0,0.3)',  text: '#ffc800' },
-            'Running':  { bg: 'rgba(0,200,120,0.1)',  border: 'rgba(0,200,120,0.3)',  text: '#00c878' },
-            'Hyrox':    { bg: 'rgba(140,0,255,0.1)',  border: 'rgba(140,0,255,0.3)',  text: '#8c00ff' },
-            'Open Gym': { bg: 'rgba(0,180,255,0.1)',  border: 'rgba(0,180,255,0.3)',  text: '#00b4ff' },
+            'CrossFit':   { bg: 'rgba(255,100,0,0.12)',  border: 'rgba(255,100,0,0.35)',  text: '#ff6400' },
+            'Gymnastics': { bg: 'rgba(255,50,150,0.1)',  border: 'rgba(255,50,150,0.3)',  text: '#ff3296' },
+            'Strength':   { bg: 'rgba(255,200,0,0.1)',   border: 'rgba(255,200,0,0.3)',   text: '#ffc800' },
+            'Olympic':    { bg: 'rgba(0,160,255,0.1)',   border: 'rgba(0,160,255,0.3)',   text: '#00a0ff' },
+            'Running':    { bg: 'rgba(0,200,120,0.1)',   border: 'rgba(0,200,120,0.3)',   text: '#00c878' },
+            'Hyrox':      { bg: 'rgba(140,0,255,0.1)',   border: 'rgba(140,0,255,0.3)',   text: '#8c00ff' },
+            'Open Gym':   { bg: 'rgba(0,180,255,0.1)',   border: 'rgba(0,180,255,0.3)',   text: '#00b4ff' },
+            'Community':  { bg: 'rgba(0,220,180,0.1)',   border: 'rgba(0,220,180,0.3)',   text: '#00dcb4' },
           }
-          const CLASS_TYPES = ['CrossFit', 'Strength', 'Running', 'Hyrox', 'Open Gym']
-          const CLASS_ICONS = { CrossFit: '🏋️', Strength: '💪', Running: '🏃', Hyrox: '⚡', 'Open Gym': '🏟️' }
+          const CLASS_TYPES = ['CrossFit', 'Gymnastics', 'Strength', 'Olympic', 'Running', 'Hyrox', 'Community', 'Open Gym']
+          const CLASS_ICONS = {
+            CrossFit: '🏋️', Gymnastics: '🤸', Strength: '💪', Olympic: '🥇',
+            Running: '🏃', Hyrox: '⚡', 'Open Gym': '🏟️', Community: '🎉'
+          }
           const fmtTime = (t) => { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h >= 12 ? 'PM' : 'AM'}` }
           const todayStr = new Date().toISOString().split('T')[0]
           const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split('T')[0]
