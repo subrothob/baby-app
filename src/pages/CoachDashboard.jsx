@@ -281,9 +281,31 @@ export default function CoachDashboard() {
     <div style={{ background: '#0a0a0a', minHeight: '100vh', color: '#fff', fontFamily: "'DM Sans', sans-serif", paddingBottom: 80, maxWidth: 480, margin: '0 auto' }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
 
-      <div style={{ padding: '48px 20px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div style={{ padding: '48px 20px 12px' }}>
+        {/* Brand bar */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+              {['B','A','B','Y'].map((letter, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
+                  <div style={{
+                    width: 22, height: 22, borderRadius: 6,
+                    background: i % 2 === 0 ? 'linear-gradient(135deg, #ff6400, #ff2d00)' : 'rgba(255,100,0,0.1)',
+                    border: i % 2 === 1 ? '1px solid rgba(255,100,0,0.35)' : 'none',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                  }}>
+                    <span style={{ fontFamily: "'Bebas Neue'", fontSize: 12, color: '#fff' }}>{letter}</span>
+                  </div>
+                  {i < 3 && <div style={{ width: 2.5, height: 2.5, borderRadius: '50%', background: 'rgba(255,100,0,0.45)', margin: '0 1.5px' }} />}
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', letterSpacing: 2.5, textTransform: 'uppercase' }}>Build A Better You</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 2 }}>{today}</div>
+          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', marginBottom: 2 }}>{today}</div>
           <div style={{ fontFamily: "'Bebas Neue'", fontSize: 30, letterSpacing: 2, lineHeight: 1 }}>COACH DASHBOARD 📋</div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -295,6 +317,7 @@ export default function CoachDashboard() {
             🔔 Notify
           </button>
           <button onClick={handleLogout} style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '8px 14px', color: 'rgba(255,255,255,0.5)', fontSize: 12, cursor: 'pointer' }}>Sign Out</button>
+        </div>
         </div>
       </div>
 

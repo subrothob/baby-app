@@ -71,12 +71,27 @@ export default function Login() {
       <div className="grid-bg" />
       <div style={{ position: 'relative', zIndex: 2 }}>
 
-        {/* Header */}
+        {/* Header — B.A.B.Y brand mark */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,#ff6400,#ff2d00)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 16, color: '#fff' }}>B</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+            {['B','A','B','Y'].map((letter, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
+                <div style={{
+                  width: 26, height: 26, borderRadius: 7,
+                  background: i % 2 === 0 ? 'linear-gradient(135deg, #ff6400, #ff2d00)' : 'rgba(255,100,0,0.12)',
+                  border: i % 2 === 1 ? '1px solid rgba(255,100,0,0.4)' : 'none',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                  <span style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 14, color: '#fff' }}>{letter}</span>
+                </div>
+                {i < 3 && <div style={{ width: 3, height: 3, borderRadius: '50%', background: 'rgba(255,100,0,0.5)', margin: '0 2px' }} />}
+              </div>
+            ))}
           </div>
-          <span style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 22, color: '#fff', letterSpacing: 4 }}>BABY</span>
+          <div>
+            <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 16, color: '#fff', letterSpacing: 3, lineHeight: 1 }}>B.A.B.Y</div>
+            <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', letterSpacing: 2, textTransform: 'uppercase' }}>Build A Better You</div>
+          </div>
         </div>
 
         <h1 style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 42, color: '#fff', letterSpacing: 3, lineHeight: 1 }}>WELCOME BACK</h1>
