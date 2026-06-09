@@ -50,6 +50,18 @@ export default function CoachDashboard() {
   const [absenteesToday, setAbsenteesToday] = useState([])
   const [memberStreaks, setMemberStreaks] = useState({})
 
+  // Class scheduling state
+  const [classSlots, setClassSlots] = useState([])
+  const [showAddClass, setShowAddClass] = useState(false)
+  const [classForm, setClassForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    start_time: '06:00', duration_mins: 60,
+    class_type: 'CrossFit', class_name: '', max_capacity: 15, location: 'Main Box', notes: ''
+  })
+  const [savingClass, setSavingClass] = useState(false)
+  const [slotBookings, setSlotBookings] = useState({}) // { slot_id: [{member_name}] }
+  const [expandedSlot, setExpandedSlot] = useState(null)
+
   // ── Notify state ──────────────────────────────────────────
   const [notifyModal, setNotifyModal] = useState(false)
   const [notifyTitle, setNotifyTitle] = useState('')
@@ -77,6 +89,7 @@ export default function CoachDashboard() {
     fetchTodayCheckins()
     fetchScheduledWods()
     fetchAttendanceTrend()
+    fetchClassSlots()
   }, [])
 
   const fetchMembers = async () => {
@@ -159,6 +172,53 @@ export default function CoachDashboard() {
       .order('scheduled_date', { ascending: true })
       .limit(10)
     if (data) setScheduledWods(data)
+  }
+
+  const fetchClassSlots = async () => {
+    const today = new Date().toISOString().split('T')[0]
+    const nextWeek = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    const { data: slots } = await supabase.from('class_slots')
+      .select('*').gte('date', today).lte('date', nextWeek)
+      .order('date').order('start_time')
+    if (!slots) return
+    const slotIds = slots.map(s => s.id)
+    const { data: bookings } = await supabase.from('class_bookings')
+      .select('slot_id, member_name, member_id, status')
+      .in('slot_id', slotIds).eq('status', 'confirmed')
+    const countMap = {}, nameMap = {}
+    bookings?.forEach(b => {
+      countMap[b.slot_id] = (countMap[b.slot_id] || 0) + 1
+      if (!nameMap[b.slot_id]) nameMap[b.slot_id] = []
+      nameMap[b.slot_id].push(b.member_name)
+    })
+    setClassSlots(slots.map(s => ({ ...s, bookedCount: countMap[s.id] || 0 })))
+    setSlotBookings(nameMap)
+  }
+
+  const handleAddClass = async () => {
+    if (!classForm.date || !classForm.start_time || !classForm.class_type) {
+      showToast('⚠ Fill in date, time and class type', 'error'); return
+    }
+    setSavingClass(true)
+    const { error } = await supabase.from('class_slots').insert([{
+      ...classForm,
+      coach_id: coach?.id, coach_name: coach?.full_name,
+      duration_mins: parseInt(classForm.duration_mins),
+      max_capacity: parseInt(classForm.max_capacity)
+    }])
+    if (!error) {
+      showToast('✅ Class added!', 'success')
+      setShowAddClass(false)
+      setClassForm({ date: new Date().toISOString().split('T')[0], start_time: '06:00', duration_mins: 60, class_type: 'CrossFit', class_name: '', max_capacity: 15, location: 'Main Box', notes: '' })
+      fetchClassSlots()
+    } else { showToast('Could not save class', 'error') }
+    setSavingClass(false)
+  }
+
+  const handleDeleteClass = async (slotId) => {
+    await supabase.from('class_slots').delete().eq('id', slotId)
+    setClassSlots(prev => prev.filter(s => s.id !== slotId))
+    showToast('Class deleted', 'info')
   }
 
   const postWod = async () => {
@@ -441,49 +501,220 @@ export default function CoachDashboard() {
         )}
 
         {/* SCHEDULE TAB */}
-        {tab === 'schedule' && (
-          <div>
-            <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>Upcoming WODs ({scheduledWods.length})</div>
-            <button onClick={() => navigate('/leaderboard')}
-              style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: '13px', color: 'rgba(255,255,255,0.5)', fontSize: 13, cursor: 'pointer', fontFamily: "'DM Sans'", marginBottom: 12 }}>
-              🏅 View Today's Leaderboard
-            </button>
-            {scheduledWods.length > 0 ? scheduledWods.map((w, i) => (
-              <div key={i} style={{ ...card, marginBottom: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12, color: accent, fontWeight: 600, marginBottom: 4 }}>
-                      {w.scheduled_date === new Date().toISOString().split('T')[0] ? '📅 TODAY' : new Date(w.scheduled_date + 'T12:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })}
+        {tab === 'schedule' && (() => {
+          const CLASS_COLORS = {
+            'CrossFit': { bg: 'rgba(255,100,0,0.12)', border: 'rgba(255,100,0,0.35)', text: '#ff6400' },
+            'Strength': { bg: 'rgba(255,200,0,0.1)',  border: 'rgba(255,200,0,0.3)',  text: '#ffc800' },
+            'Running':  { bg: 'rgba(0,200,120,0.1)',  border: 'rgba(0,200,120,0.3)',  text: '#00c878' },
+            'Hyrox':    { bg: 'rgba(140,0,255,0.1)',  border: 'rgba(140,0,255,0.3)',  text: '#8c00ff' },
+            'Open Gym': { bg: 'rgba(0,180,255,0.1)',  border: 'rgba(0,180,255,0.3)',  text: '#00b4ff' },
+          }
+          const CLASS_TYPES = ['CrossFit', 'Strength', 'Running', 'Hyrox', 'Open Gym']
+          const CLASS_ICONS = { CrossFit: '🏋️', Strength: '💪', Running: '🏃', Hyrox: '⚡', 'Open Gym': '🏟️' }
+          const fmtTime = (t) => { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h >= 12 ? 'PM' : 'AM'}` }
+          const todayStr = new Date().toISOString().split('T')[0]
+          const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split('T')[0]
+          const dayLabel = (d) => {
+            if (d === todayStr) return 'TODAY'
+            if (d === tomorrowStr) return 'TOMORROW'
+            return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase()
+          }
+          // Group by date
+          const grouped = {}
+          classSlots.forEach(s => { if (!grouped[s.date]) grouped[s.date] = []; grouped[s.date].push(s) })
+
+          const inField = { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '11px 12px', color: '#fff', fontSize: 13, fontFamily: "'DM Sans'", width: '100%', outline: 'none', colorScheme: 'dark', boxSizing: 'border-box' }
+
+          return (
+            <div>
+              {/* Header row */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600 }}>Class Schedule</div>
+                <button onClick={() => setShowAddClass(v => !v)}
+                  style={{ background: showAddClass ? 'rgba(255,255,255,0.06)' : accent, border: 'none', borderRadius: 10, padding: '8px 16px', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
+                  {showAddClass ? 'Cancel' : '+ Add Class'}
+                </button>
+              </div>
+
+              {/* Add class form */}
+              {showAddClass && (
+                <div style={{ ...card, marginBottom: 16, border: '1px solid rgba(255,100,0,0.3)' }}>
+                  <div style={{ fontSize: 12, color: accent, fontWeight: 600, marginBottom: 12, letterSpacing: 1 }}>NEW CLASS SLOT</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 5 }}>Date</div>
+                      <input type="date" value={classForm.date} onChange={e => setClassForm(f => ({ ...f, date: e.target.value }))} style={inField} />
                     </div>
-                    <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                      {w.type && <span style={{ background: accentDim, color: accent, fontSize: 11, padding: '2px 8px', borderRadius: 99 }}>{w.type}</span>}
-                      {w.name && <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>{w.name}</span>}
+                    <div>
+                      <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 5 }}>Start Time</div>
+                      <input type="time" value={classForm.start_time} onChange={e => setClassForm(f => ({ ...f, start_time: e.target.value }))} style={inField} />
                     </div>
-                    {w.conditioning && <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', lineHeight: 1.4 }}>{w.conditioning.substring(0, 80)}{w.conditioning.length > 80 ? '...' : ''}</div>}
                   </div>
-                  <div style={{ display: 'flex', gap: 6, marginLeft: 10, flexShrink: 0 }}>
-                    {/* ── Per-WOD notify button ── */}
-                    <button
-                      onClick={() => {
-                        const dateLabel = w.scheduled_date === new Date().toISOString().split('T')[0] ? "today's" : `${new Date(w.scheduled_date + 'T12:00:00').toLocaleDateString('en-IN', { weekday: 'long' })}'s`
-                        setNotifyTitle(`${dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1)} WOD is up! 🔥`)
-                        setNotifyBody(w.conditioning ? w.conditioning.substring(0, 100) : '')
-                        setNotifyModal(true)
-                      }}
-                      style={{ background: accentDim, border: '1px solid rgba(255,100,0,0.2)', borderRadius: 8, padding: '4px 10px', color: accent, fontSize: 11, cursor: 'pointer' }}
-                    >🔔</button>
-                    <button onClick={() => deleteWod(w.id)} style={{ background: 'rgba(255,50,50,0.1)', border: '1px solid rgba(255,50,50,0.2)', borderRadius: 8, padding: '4px 10px', color: 'rgba(255,80,80,0.8)', fontSize: 11, cursor: 'pointer' }}>Delete</button>
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 5 }}>Class Type</div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {CLASS_TYPES.map(t => {
+                        const col = CLASS_COLORS[t]
+                        const sel = classForm.class_type === t
+                        return (
+                          <button key={t} onClick={() => setClassForm(f => ({ ...f, class_type: t }))}
+                            style={{ background: sel ? col.bg : 'transparent', border: `1px solid ${sel ? col.border : 'rgba(255,255,255,0.1)'}`, borderRadius: 8, padding: '6px 12px', color: sel ? col.text : 'rgba(255,255,255,0.4)', fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
+                            {CLASS_ICONS[t]} {t}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 5 }}>Class Name (optional)</div>
+                      <input placeholder="e.g. Barbell Club" value={classForm.class_name} onChange={e => setClassForm(f => ({ ...f, class_name: e.target.value }))} style={inField} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 5 }}>Max Capacity</div>
+                      <input type="number" min={1} max={50} value={classForm.max_capacity} onChange={e => setClassForm(f => ({ ...f, max_capacity: e.target.value }))} style={inField} />
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 5 }}>Duration (mins)</div>
+                      <input type="number" value={classForm.duration_mins} onChange={e => setClassForm(f => ({ ...f, duration_mins: e.target.value }))} style={inField} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 5 }}>Location</div>
+                      <input placeholder="Main Box" value={classForm.location} onChange={e => setClassForm(f => ({ ...f, location: e.target.value }))} style={inField} />
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 5 }}>Notes (optional)</div>
+                    <input placeholder="e.g. Strength focus, bring your best effort!" value={classForm.notes} onChange={e => setClassForm(f => ({ ...f, notes: e.target.value }))} style={inField} />
+                  </div>
+                  <button onClick={handleAddClass} disabled={savingClass}
+                    style={{ width: '100%', background: accent, border: 'none', borderRadius: 10, padding: '13px', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
+                    {savingClass ? 'Saving...' : '✅ Add Class Slot'}
+                  </button>
                 </div>
+              )}
+
+              {/* Class slots grouped by day */}
+              {Object.keys(grouped).length === 0 && !showAddClass && (
+                <div style={{ ...card, textAlign: 'center', padding: '40px 20px', color: 'rgba(255,255,255,0.3)' }}>
+                  <div style={{ fontSize: 40, marginBottom: 10 }}>📅</div>
+                  No classes scheduled yet.<br />Tap "+ Add Class" to post your first slot!
+                </div>
+              )}
+
+              {Object.entries(grouped).map(([date, slots]) => (
+                <div key={date} style={{ marginBottom: 20 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 2, color: date === todayStr ? accent : 'rgba(255,255,255,0.5)', background: date === todayStr ? accentDim : 'transparent', padding: date === todayStr ? '3px 10px' : '3px 0', borderRadius: 99 }}>{dayLabel(date)}</div>
+                    <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
+                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)' }}>{slots.length} class{slots.length !== 1 ? 'es' : ''}</span>
+                  </div>
+
+                  {slots.map(slot => {
+                    const col = CLASS_COLORS[slot.class_type] || CLASS_COLORS['CrossFit']
+                    const spotsLeft = slot.max_capacity - slot.bookedCount
+                    const bookedNames = slotBookings[slot.id] || []
+                    const isExpanded = expandedSlot === slot.id
+
+                    return (
+                      <div key={slot.id} style={{ ...card, marginBottom: 10, border: `1px solid ${col.border}` }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+                            <div style={{ width: 40, height: 40, borderRadius: 10, background: col.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
+                              {CLASS_ICONS[slot.class_type] || '🏋️'}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 1 }}>{slot.class_name || slot.class_type} <span style={{ fontSize: 10, color: col.text }}>({slot.class_type})</span></div>
+                              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>{fmtTime(slot.start_time)} · {slot.duration_mins}min</div>
+                            </div>
+                          </div>
+
+                          {/* Booking count badge + actions */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                            <button onClick={() => setExpandedSlot(isExpanded ? null : slot.id)}
+                              style={{ background: slot.bookedCount > 0 ? col.bg : 'rgba(255,255,255,0.05)', border: `1px solid ${slot.bookedCount > 0 ? col.border : 'rgba(255,255,255,0.1)'}`, borderRadius: 8, padding: '5px 10px', color: slot.bookedCount > 0 ? col.text : 'rgba(255,255,255,0.4)', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+                              {slot.bookedCount}/{slot.max_capacity} {isExpanded ? '▲' : '▼'}
+                            </button>
+                            <button onClick={() => handleDeleteClass(slot.id)}
+                              style={{ background: 'rgba(255,50,50,0.08)', border: '1px solid rgba(255,50,50,0.2)', borderRadius: 8, padding: '5px 10px', color: 'rgba(255,80,80,0.7)', fontSize: 11, cursor: 'pointer' }}>✕</button>
+                          </div>
+                        </div>
+
+                        {/* Capacity bar */}
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'rgba(255,255,255,0.3)', marginBottom: 4 }}>
+                            <span>{slot.bookedCount} booked</span>
+                            <span style={{ color: spotsLeft === 0 ? '#ff5050' : 'rgba(255,255,255,0.3)' }}>{spotsLeft === 0 ? 'FULL' : `${spotsLeft} spots left`}</span>
+                          </div>
+                          <div style={{ height: 5, background: 'rgba(255,255,255,0.07)', borderRadius: 99, overflow: 'hidden' }}>
+                            <div style={{ width: `${Math.min(100, (slot.bookedCount / slot.max_capacity) * 100)}%`, height: '100%', background: slot.bookedCount >= slot.max_capacity ? '#ff3a00' : slot.bookedCount / slot.max_capacity > 0.7 ? '#ffb800' : '#00c878', borderRadius: 99 }} />
+                          </div>
+                        </div>
+
+                        {/* Expanded: list of booked members */}
+                        {isExpanded && (
+                          <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                            {bookedNames.length === 0
+                              ? <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', textAlign: 'center' }}>No bookings yet</div>
+                              : bookedNames.map((name, i) => (
+                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: i < bookedNames.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
+                                  <div style={{ width: 26, height: 26, borderRadius: 8, background: col.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, color: col.text }}>{name?.[0]?.toUpperCase()}</div>
+                                  <span style={{ fontSize: 13 }}>{name}</span>
+                                  <span style={{ fontSize: 10, color: '#00c878', marginLeft: 'auto' }}>✓ Booked</span>
+                                </div>
+                              ))
+                            }
+                          </div>
+                        )}
+                        {slot.notes && <div style={{ marginTop: 8, fontSize: 11, color: 'rgba(255,255,255,0.3)', fontStyle: 'italic' }}>📝 {slot.notes}</div>}
+                      </div>
+                    )
+                  })}
+                </div>
+              ))}
+
+              {/* WODs section */}
+              <div style={{ marginTop: 24, marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600 }}>Upcoming WODs ({scheduledWods.length})</div>
+                  <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
+                </div>
+                <button onClick={() => navigate('/leaderboard')}
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: '13px', color: 'rgba(255,255,255,0.5)', fontSize: 13, cursor: 'pointer', fontFamily: "'DM Sans'", marginBottom: 12 }}>
+                  🏅 View Today's Leaderboard
+                </button>
+                {scheduledWods.length > 0 ? scheduledWods.map((w, i) => (
+                  <div key={i} style={{ ...card, marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: accent, fontWeight: 600, marginBottom: 4 }}>
+                          {w.scheduled_date === new Date().toISOString().split('T')[0] ? '📅 TODAY' : new Date(w.scheduled_date + 'T12:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })}
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                          {w.type && <span style={{ background: accentDim, color: accent, fontSize: 11, padding: '2px 8px', borderRadius: 99 }}>{w.type}</span>}
+                          {w.name && <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>{w.name}</span>}
+                        </div>
+                        {w.conditioning && <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', lineHeight: 1.4 }}>{w.conditioning.substring(0, 80)}{w.conditioning.length > 80 ? '...' : ''}</div>}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, marginLeft: 10, flexShrink: 0 }}>
+                        <button onClick={() => { const dateLabel = w.scheduled_date === new Date().toISOString().split('T')[0] ? "today's" : `${new Date(w.scheduled_date + 'T12:00:00').toLocaleDateString('en-IN', { weekday: 'long' })}'s`; setNotifyTitle(`${dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1)} WOD is up! 🔥`); setNotifyBody(w.conditioning ? w.conditioning.substring(0, 100) : ''); setNotifyModal(true) }}
+                          style={{ background: accentDim, border: '1px solid rgba(255,100,0,0.2)', borderRadius: 8, padding: '4px 10px', color: accent, fontSize: 11, cursor: 'pointer' }}>🔔</button>
+                        <button onClick={() => deleteWod(w.id)} style={{ background: 'rgba(255,50,50,0.1)', border: '1px solid rgba(255,50,50,0.2)', borderRadius: 8, padding: '4px 10px', color: 'rgba(255,80,80,0.8)', fontSize: 11, cursor: 'pointer' }}>Delete</button>
+                      </div>
+                    </div>
+                  </div>
+                )) : (
+                  <div style={{ ...card, textAlign: 'center', padding: '32px 20px', color: 'rgba(255,255,255,0.3)' }}>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>⚡</div>
+                    No WODs scheduled. Go to "Post WOD" to add one!
+                  </div>
+                )}
               </div>
-            )) : (
-              <div style={{ ...card, textAlign: 'center', padding: '40px 20px', color: 'rgba(255,255,255,0.3)' }}>
-                <div style={{ fontSize: 40, marginBottom: 10 }}>📅</div>
-                No WODs scheduled yet.<br />Go to Post WOD to schedule ahead!
-              </div>
-            )}
-          </div>
-        )}
+            </div>
+          )
+        })()}
 
         {/* CHECK-INS TAB */}
         {tab === 'checkins' && (

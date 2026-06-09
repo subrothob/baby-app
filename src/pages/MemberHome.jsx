@@ -358,6 +358,11 @@ export default function MemberHome() {
   const [goalForm, setGoalForm] = useState({ movement: '', target_value: '', pb_type: 'Weight' })
   const [savingGoal, setSavingGoal] = useState(false)
 
+  // Classes & Bookings
+  const [classes, setClasses] = useState([])
+  const [myBookings, setMyBookings] = useState(new Set())
+  const [classBookingLoading, setClassBookingLoading] = useState(new Set())
+
   // Notification state
   const [notifStatus, setNotifStatus] = useState('idle')
 
@@ -378,6 +383,7 @@ export default function MemberHome() {
     fetchAttendanceAndStreak(m.id)
     checkTodayScore(m.id)
     fetchGoals(m.id)
+    fetchClasses(m.id)
   }, [])
 
   useEffect(() => {
@@ -482,6 +488,55 @@ export default function MemberHome() {
     const { data } = await supabase.from('member_goals').select('*')
       .eq('member_id', memberId).order('created_at', { ascending: false })
     if (data) setGoals(data)
+  }
+
+  const fetchClasses = async (memberId) => {
+    const today = new Date().toISOString().split('T')[0]
+    const nextWeek = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    const { data: slots } = await supabase.from('class_slots')
+      .select('*').gte('date', today).lte('date', nextWeek)
+      .order('date').order('start_time')
+    if (!slots || slots.length === 0) return
+    const slotIds = slots.map(s => s.id)
+    const { data: bookings } = await supabase.from('class_bookings')
+      .select('slot_id, member_id, status')
+      .in('slot_id', slotIds).eq('status', 'confirmed')
+    const countMap = {}
+    const myBooked = new Set()
+    bookings?.forEach(b => {
+      countMap[b.slot_id] = (countMap[b.slot_id] || 0) + 1
+      if (b.member_id === memberId) myBooked.add(b.slot_id)
+    })
+    setClasses(slots.map(s => ({ ...s, bookedCount: countMap[s.id] || 0 })))
+    setMyBookings(myBooked)
+  }
+
+  const handleBookClass = async (slot) => {
+    if (!member || myBookings.has(slot.id)) return
+    if (slot.bookedCount >= slot.max_capacity) { showToast('❌ Class is full', 'error'); return }
+    setClassBookingLoading(prev => new Set([...prev, slot.id]))
+    const { error } = await supabase.from('class_bookings').insert([{
+      slot_id: slot.id, member_id: member.id, member_name: member.full_name, status: 'confirmed'
+    }])
+    if (!error) {
+      setMyBookings(prev => new Set([...prev, slot.id]))
+      setClasses(prev => prev.map(s => s.id === slot.id ? { ...s, bookedCount: s.bookedCount + 1 } : s))
+      showToast(`✅ Booked! ${slot.class_type} @ ${slot.start_time}`, 'success')
+    } else { showToast('Could not book. Try again.', 'error') }
+    setClassBookingLoading(prev => { const n = new Set(prev); n.delete(slot.id); return n })
+  }
+
+  const handleCancelBooking = async (slot) => {
+    if (!member) return
+    setClassBookingLoading(prev => new Set([...prev, slot.id]))
+    const { error } = await supabase.from('class_bookings')
+      .update({ status: 'cancelled' }).eq('slot_id', slot.id).eq('member_id', member.id)
+    if (!error) {
+      setMyBookings(prev => { const n = new Set(prev); n.delete(slot.id); return n })
+      setClasses(prev => prev.map(s => s.id === slot.id ? { ...s, bookedCount: Math.max(0, s.bookedCount - 1) } : s))
+      showToast('Booking cancelled', 'info')
+    }
+    setClassBookingLoading(prev => { const n = new Set(prev); n.delete(slot.id); return n })
   }
 
   // ── Actions ─────────────────────────────────────────────────────────────────
@@ -630,11 +685,12 @@ export default function MemberHome() {
   })
 
   const tabs = [
-    { id: 'home', label: 'Home', icon: '🏠' },
-    { id: 'wod', label: 'WOD', icon: '⚡' },
-    { id: 'progress', label: 'Progress', icon: '📈' },
-    { id: 'pbs', label: 'My PBs', icon: '🏆' },
-    { id: 'board', label: 'Board', icon: '📊' },
+    { id: 'home',    label: 'Home',    icon: '🏠' },
+    { id: 'classes', label: 'Classes', icon: '📅' },
+    { id: 'wod',     label: 'WOD',     icon: '⚡' },
+    { id: 'progress',label: 'Progress',icon: '📈' },
+    { id: 'pbs',     label: 'My PBs',  icon: '🏆' },
+    { id: 'board',   label: 'Board',   icon: '📊' },
   ]
 
   const inputStyle = {
@@ -748,6 +804,47 @@ export default function MemberHome() {
                 </>
               ) : <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14 }}>No WOD posted yet. Check back soon! 💤</div>}
             </div>
+
+            {/* Today's Classes preview */}
+            {(() => {
+              const today = new Date().toISOString().split('T')[0]
+              const todayClasses = classes.filter(c => c.date === today)
+              if (todayClasses.length === 0) return null
+              const CLASS_ICONS = { CrossFit: '🏋️', Strength: '💪', Running: '🏃', Hyrox: '⚡', 'Open Gym': '🏟️' }
+              const fmtTime = (t) => { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h >= 12 ? 'PM' : 'AM'}` }
+              return (
+                <div style={{ ...card, marginBottom: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, color: '#00b4ff', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600 }}>Today's Classes 📅</div>
+                    <button onClick={() => setTab('classes')} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans'" }}>See all →</button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {todayClasses.map(slot => {
+                      const isBooked = myBookings.has(slot.id)
+                      const spotsLeft = slot.max_capacity - slot.bookedCount
+                      return (
+                        <div key={slot.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '10px 12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <span style={{ fontSize: 18 }}>{CLASS_ICONS[slot.class_type] || '🏋️'}</span>
+                            <div>
+                              <div style={{ fontSize: 13, fontWeight: 500 }}>{slot.class_name || slot.class_type}</div>
+                              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>{fmtTime(slot.start_time)} · {spotsLeft > 0 ? `${spotsLeft} spots left` : 'Full'}</div>
+                            </div>
+                          </div>
+                          {isBooked
+                            ? <span style={{ fontSize: 11, color: '#00c878', fontWeight: 600 }}>✓ Booked</span>
+                            : <button onClick={() => handleBookClass(slot)} disabled={spotsLeft <= 0 || classBookingLoading.has(slot.id)}
+                                style={{ background: accent, border: 'none', borderRadius: 8, padding: '7px 14px', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'", opacity: spotsLeft <= 0 ? 0.4 : 1 }}>
+                                {classBookingLoading.has(slot.id) ? '...' : 'Book'}
+                              </button>
+                          }
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })()}
 
             {/* Goals preview */}
             {goals.length > 0 && (
@@ -1153,6 +1250,164 @@ export default function MemberHome() {
             )}
           </div>
         )}
+
+        {/* ── CLASSES TAB ── */}
+        {tab === 'classes' && (() => {
+          const CLASS_COLORS = {
+            'CrossFit':  { bg: 'rgba(255,100,0,0.12)',  border: 'rgba(255,100,0,0.35)',  text: '#ff6400' },
+            'Strength':  { bg: 'rgba(255,200,0,0.1)',   border: 'rgba(255,200,0,0.3)',   text: '#ffc800' },
+            'Running':   { bg: 'rgba(0,200,120,0.1)',   border: 'rgba(0,200,120,0.3)',   text: '#00c878' },
+            'Hyrox':     { bg: 'rgba(140,0,255,0.1)',   border: 'rgba(140,0,255,0.3)',   text: '#8c00ff' },
+            'Open Gym':  { bg: 'rgba(0,180,255,0.1)',   border: 'rgba(0,180,255,0.3)',   text: '#00b4ff' },
+          }
+          const CLASS_ICONS = { CrossFit: '🏋️', Strength: '💪', Running: '🏃', Hyrox: '⚡', 'Open Gym': '🏟️' }
+
+          // Format time "06:00" → "6:00 AM"
+          const fmtTime = (t) => {
+            const [h, m] = t.split(':').map(Number)
+            const ampm = h >= 12 ? 'PM' : 'AM'
+            return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`
+          }
+
+          // Group classes by date
+          const grouped = {}
+          classes.forEach(c => {
+            if (!grouped[c.date]) grouped[c.date] = []
+            grouped[c.date].push(c)
+          })
+          const today = new Date().toISOString().split('T')[0]
+          const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0]
+          const dayLabel = (d) => {
+            if (d === today) return 'TODAY'
+            if (d === tomorrow) return 'TOMORROW'
+            return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase()
+          }
+
+          const myUpcoming = classes.filter(c => myBookings.has(c.id) && c.date >= today)
+
+          return (
+            <>
+              <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 14 }}>CLASS SCHEDULE</div>
+
+              {/* My bookings strip */}
+              {myUpcoming.length > 0 && (
+                <div style={{ ...card, marginBottom: 16, background: 'rgba(0,200,120,0.06)', border: '1px solid rgba(0,200,120,0.2)' }}>
+                  <div style={{ fontSize: 11, color: '#00c878', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 10 }}>✅ My Bookings ({myUpcoming.length})</div>
+                  {myUpcoming.map(slot => {
+                    const col = CLASS_COLORS[slot.class_type] || CLASS_COLORS['CrossFit']
+                    return (
+                      <div key={slot.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div style={{ width: 36, height: 36, borderRadius: 10, background: col.bg, border: `1px solid ${col.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>
+                            {CLASS_ICONS[slot.class_type] || '🏋️'}
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{slot.class_name || slot.class_type}</div>
+                            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>{dayLabel(slot.date)} · {fmtTime(slot.start_time)}</div>
+                          </div>
+                        </div>
+                        <button onClick={() => handleCancelBooking(slot)} disabled={classBookingLoading.has(slot.id)}
+                          style={{ background: 'rgba(255,80,80,0.1)', border: '1px solid rgba(255,80,80,0.25)', borderRadius: 8, padding: '6px 12px', color: 'rgba(255,120,120,0.9)', fontSize: 11, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
+                          {classBookingLoading.has(slot.id) ? '...' : 'Cancel'}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Schedule by day */}
+              {Object.keys(grouped).length === 0 && (
+                <div style={{ ...card, textAlign: 'center', padding: '32px 20px', color: 'rgba(255,255,255,0.3)' }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>📅</div>
+                  <div style={{ fontSize: 14 }}>No classes scheduled yet</div>
+                  <div style={{ fontSize: 12, marginTop: 4 }}>Check back soon!</div>
+                </div>
+              )}
+
+              {Object.entries(grouped).map(([date, slots]) => (
+                <div key={date} style={{ marginBottom: 20 }}>
+                  {/* Day header */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                    <div style={{
+                      fontSize: 11, fontWeight: 700, letterSpacing: 2,
+                      color: date === today ? accent : 'rgba(255,255,255,0.5)',
+                      background: date === today ? accentDim : 'transparent',
+                      padding: date === today ? '3px 10px' : '3px 0',
+                      borderRadius: 99
+                    }}>{dayLabel(date)}</div>
+                    <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
+                  </div>
+
+                  {/* Class cards */}
+                  {slots.map(slot => {
+                    const col = CLASS_COLORS[slot.class_type] || CLASS_COLORS['CrossFit']
+                    const spotsLeft = slot.max_capacity - slot.bookedCount
+                    const isFull = spotsLeft <= 0
+                    const isBooked = myBookings.has(slot.id)
+                    const isLoading = classBookingLoading.has(slot.id)
+                    const fillPct = Math.min(100, Math.round((slot.bookedCount / slot.max_capacity) * 100))
+
+                    return (
+                      <div key={slot.id} style={{
+                        ...card,
+                        marginBottom: 10,
+                        border: `1px solid ${isBooked ? 'rgba(0,200,120,0.3)' : isFull ? 'rgba(255,255,255,0.06)' : col.border}`,
+                        background: isBooked ? 'rgba(0,200,120,0.05)' : 'rgba(255,255,255,0.03)',
+                        opacity: isFull && !isBooked ? 0.6 : 1
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                          {/* Left: icon + info */}
+                          <div style={{ display: 'flex', gap: 12, flex: 1, minWidth: 0 }}>
+                            <div style={{ width: 44, height: 44, borderRadius: 12, background: col.bg, border: `1.5px solid ${col.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+                              {CLASS_ICONS[slot.class_type] || '🏋️'}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: 14, fontWeight: 600 }}>{slot.class_name || slot.class_type}</span>
+                                <span style={{ fontSize: 10, color: col.text, background: col.bg, padding: '2px 7px', borderRadius: 99, fontWeight: 600 }}>{slot.class_type}</span>
+                              </div>
+                              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>
+                                🕐 {fmtTime(slot.start_time)} · {slot.duration_mins}min
+                                {slot.location && ` · ${slot.location}`}
+                              </div>
+                              {slot.notes && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginBottom: 6, fontStyle: 'italic' }}>{slot.notes}</div>}
+
+                              {/* Capacity bar */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div style={{ flex: 1, height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 99, overflow: 'hidden' }}>
+                                  <div style={{ width: `${fillPct}%`, height: '100%', background: fillPct >= 90 ? '#ff3a00' : fillPct >= 70 ? '#ffb800' : '#00c878', borderRadius: 99 }} />
+                                </div>
+                                <span style={{ fontSize: 10, color: isFull ? '#ff5050' : 'rgba(255,255,255,0.4)', whiteSpace: 'nowrap', fontWeight: isFull ? 600 : 400 }}>
+                                  {isFull ? 'Full' : `${spotsLeft} spot${spotsLeft !== 1 ? 's' : ''} left`}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Book button */}
+                          <button
+                            onClick={() => isBooked ? handleCancelBooking(slot) : handleBookClass(slot)}
+                            disabled={isLoading || (isFull && !isBooked)}
+                            style={{
+                              background: isBooked ? 'rgba(0,200,120,0.15)' : isFull ? 'rgba(255,255,255,0.05)' : accent,
+                              border: `1px solid ${isBooked ? 'rgba(0,200,120,0.4)' : isFull ? 'rgba(255,255,255,0.1)' : 'transparent'}`,
+                              borderRadius: 10, padding: '10px 14px',
+                              color: isBooked ? '#00c878' : isFull ? 'rgba(255,255,255,0.3)' : '#fff',
+                              fontSize: 12, fontWeight: 600, cursor: isFull && !isBooked ? 'not-allowed' : 'pointer',
+                              flexShrink: 0, fontFamily: "'DM Sans'", whiteSpace: 'nowrap'
+                            }}>
+                            {isLoading ? '...' : isBooked ? '✓ Booked' : isFull ? 'Full' : 'Book'}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ))}
+            </>
+          )
+        })()}
 
         {/* ── BOARD TAB ── */}
         {tab === 'board' && (
