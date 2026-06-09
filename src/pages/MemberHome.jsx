@@ -362,6 +362,7 @@ export default function MemberHome() {
   const [classes, setClasses] = useState([])
   const [myBookings, setMyBookings] = useState(new Set())
   const [classBookingLoading, setClassBookingLoading] = useState(new Set())
+  const [selectedClassDate, setSelectedClassDate] = useState(new Date().toISOString().split('T')[0])
 
   // Notification state
   const [notifStatus, setNotifStatus] = useState('idle')
@@ -1254,67 +1255,92 @@ export default function MemberHome() {
         {/* ── CLASSES TAB ── */}
         {tab === 'classes' && (() => {
           const CLASS_COLORS = {
-            'CrossFit':    { bg: 'rgba(255,100,0,0.12)',  border: 'rgba(255,100,0,0.35)',  text: '#ff6400' },
-            'Gymnastics':  { bg: 'rgba(255,50,150,0.1)',  border: 'rgba(255,50,150,0.3)',  text: '#ff3296' },
-            'Strength':    { bg: 'rgba(255,200,0,0.1)',   border: 'rgba(255,200,0,0.3)',   text: '#ffc800' },
-            'Olympic':     { bg: 'rgba(0,160,255,0.1)',   border: 'rgba(0,160,255,0.3)',   text: '#00a0ff' },
-            'Running':     { bg: 'rgba(0,200,120,0.1)',   border: 'rgba(0,200,120,0.3)',   text: '#00c878' },
-            'Hyrox':       { bg: 'rgba(140,0,255,0.1)',   border: 'rgba(140,0,255,0.3)',   text: '#8c00ff' },
-            'Open Gym':    { bg: 'rgba(0,180,255,0.1)',   border: 'rgba(0,180,255,0.3)',   text: '#00b4ff' },
-            'Community':   { bg: 'rgba(0,220,180,0.1)',   border: 'rgba(0,220,180,0.3)',   text: '#00dcb4' },
+            'CrossFit':   { bg: 'rgba(255,100,0,0.12)', border: 'rgba(255,100,0,0.35)', text: '#ff6400' },
+            'Gymnastics': { bg: 'rgba(255,50,150,0.1)', border: 'rgba(255,50,150,0.3)', text: '#ff3296' },
+            'Strength':   { bg: 'rgba(255,200,0,0.1)',  border: 'rgba(255,200,0,0.3)',  text: '#ffc800' },
+            'Olympic':    { bg: 'rgba(0,160,255,0.1)',  border: 'rgba(0,160,255,0.3)',  text: '#00a0ff' },
+            'Running':    { bg: 'rgba(0,200,120,0.1)',  border: 'rgba(0,200,120,0.3)',  text: '#00c878' },
+            'Hyrox':      { bg: 'rgba(140,0,255,0.1)',  border: 'rgba(140,0,255,0.3)',  text: '#8c00ff' },
+            'Open Gym':   { bg: 'rgba(0,180,255,0.1)',  border: 'rgba(0,180,255,0.3)',  text: '#00b4ff' },
+            'Community':  { bg: 'rgba(0,220,180,0.1)',  border: 'rgba(0,220,180,0.3)',  text: '#00dcb4' },
           }
           const CLASS_ICONS = {
-            CrossFit: '🏋️', Gymnastics: '🤸', Strength: '💪', Olympic: '🥇',
-            Running: '🏃', Hyrox: '⚡', 'Open Gym': '🏟️', Community: '🎉'
+            CrossFit:'🏋️', Gymnastics:'🤸', Strength:'💪', Olympic:'🥇',
+            Running:'🏃', Hyrox:'⚡', 'Open Gym':'🏟️', Community:'🎉'
+          }
+          const fmtTime = (t) => { const [h,m]=t.split(':').map(Number); return `${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}` }
+
+          // Build 7-day picker: today + next 6 days (skip Sunday=0)
+          const todayStr = new Date().toISOString().split('T')[0]
+          const pickerDays = []
+          let d = new Date(); d.setHours(0,0,0,0)
+          while (pickerDays.length < 7) {
+            const iso = d.toISOString().split('T')[0]
+            const dow = d.getDay()
+            if (dow !== 0) { // skip Sunday
+              pickerDays.push({
+                iso,
+                dow,
+                label: iso === todayStr ? 'Today' : d.toLocaleDateString('en-IN',{weekday:'short'}),
+                dayNum: d.getDate()
+              })
+            }
+            d.setDate(d.getDate()+1)
           }
 
-          // Format time "06:00" → "6:00 AM"
-          const fmtTime = (t) => {
-            const [h, m] = t.split(':').map(Number)
-            const ampm = h >= 12 ? 'PM' : 'AM'
-            return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`
-          }
+          const displayDate = selectedClassDate
+          const daySlots = classes.filter(c => c.date === displayDate)
+          const myUpcoming = classes.filter(c => myBookings.has(c.id) && c.date >= todayStr)
 
-          // Group classes by date
-          const grouped = {}
-          classes.forEach(c => {
-            if (!grouped[c.date]) grouped[c.date] = []
-            grouped[c.date].push(c)
-          })
-          const today = new Date().toISOString().split('T')[0]
-          const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0]
-          const dayLabel = (d) => {
-            if (d === today) return 'TODAY'
-            if (d === tomorrow) return 'TOMORROW'
-            return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase()
-          }
-
-          const myUpcoming = classes.filter(c => myBookings.has(c.id) && c.date >= today)
+          // Full day name for header
+          const headerLabel = displayDate === todayStr
+            ? "Today's Classes"
+            : new Date(displayDate+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short'})
 
           return (
             <>
-              <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 14 }}>CLASS SCHEDULE</div>
+              {/* Day picker strip */}
+              <div style={{ display: 'flex', gap: 6, marginBottom: 16, overflowX: 'auto', paddingBottom: 4 }}>
+                {pickerDays.map(pd => {
+                  const sel = pd.iso === displayDate
+                  const hasClass = classes.some(c => c.date === pd.iso)
+                  return (
+                    <button key={pd.iso} onClick={() => setSelectedClassDate(pd.iso)}
+                      style={{
+                        flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                        gap: 2, padding: '8px 12px', borderRadius: 12, cursor: 'pointer',
+                        background: sel ? accent : 'rgba(255,255,255,0.05)',
+                        border: `1px solid ${sel ? accent : 'rgba(255,255,255,0.08)'}`,
+                        minWidth: 52
+                      }}>
+                      <span style={{ fontSize: 10, color: sel ? '#fff' : 'rgba(255,255,255,0.4)', fontWeight: 600, fontFamily:"'DM Sans'" }}>{pd.label}</span>
+                      <span style={{ fontSize: 16, fontFamily:"'Bebas Neue'", color: sel ? '#fff' : 'rgba(255,255,255,0.7)', letterSpacing:1 }}>{pd.dayNum}</span>
+                      {hasClass && <div style={{ width:4, height:4, borderRadius:'50%', background: sel ? 'rgba(255,255,255,0.6)' : accent }} />}
+                    </button>
+                  )
+                })}
+              </div>
 
-              {/* My bookings strip */}
+              {/* My upcoming bookings (compact, only if any) */}
               {myUpcoming.length > 0 && (
-                <div style={{ ...card, marginBottom: 16, background: 'rgba(0,200,120,0.06)', border: '1px solid rgba(0,200,120,0.2)' }}>
-                  <div style={{ fontSize: 11, color: '#00c878', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 10 }}>✅ My Bookings ({myUpcoming.length})</div>
+                <div style={{ ...card, marginBottom: 14, background:'rgba(0,200,120,0.05)', border:'1px solid rgba(0,200,120,0.2)' }}>
+                  <div style={{ fontSize:11, color:'#00c878', letterSpacing:2, textTransform:'uppercase', fontWeight:600, marginBottom:8 }}>✅ My Bookings ({myUpcoming.length})</div>
                   {myUpcoming.map(slot => {
                     const col = CLASS_COLORS[slot.class_type] || CLASS_COLORS['CrossFit']
                     return (
-                      <div key={slot.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <div style={{ width: 36, height: 36, borderRadius: 10, background: col.bg, border: `1px solid ${col.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>
-                            {CLASS_ICONS[slot.class_type] || '🏋️'}
-                          </div>
+                      <div key={slot.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', paddingBottom:7, marginBottom:7, borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                          <span style={{ fontSize:16 }}>{CLASS_ICONS[slot.class_type]||'🏋️'}</span>
                           <div>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>{slot.class_name || slot.class_type}</div>
-                            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>{dayLabel(slot.date)} · {fmtTime(slot.start_time)}</div>
+                            <div style={{ fontSize:12, fontWeight:600 }}>{slot.class_name||slot.class_type}</div>
+                            <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)' }}>
+                              {slot.date === todayStr ? 'Today' : new Date(slot.date+'T00:00:00').toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'})} · {fmtTime(slot.start_time)}
+                            </div>
                           </div>
                         </div>
                         <button onClick={() => handleCancelBooking(slot)} disabled={classBookingLoading.has(slot.id)}
-                          style={{ background: 'rgba(255,80,80,0.1)', border: '1px solid rgba(255,80,80,0.25)', borderRadius: 8, padding: '6px 12px', color: 'rgba(255,120,120,0.9)', fontSize: 11, cursor: 'pointer', fontFamily: "'DM Sans'" }}>
-                          {classBookingLoading.has(slot.id) ? '...' : 'Cancel'}
+                          style={{ background:'rgba(255,80,80,0.1)', border:'1px solid rgba(255,80,80,0.2)', borderRadius:7, padding:'5px 11px', color:'rgba(255,120,120,0.9)', fontSize:11, cursor:'pointer', fontFamily:"'DM Sans'" }}>
+                          {classBookingLoading.has(slot.id)?'...':'Cancel'}
                         </button>
                       </div>
                     )
@@ -1322,95 +1348,82 @@ export default function MemberHome() {
                 </div>
               )}
 
-              {/* Schedule by day */}
-              {Object.keys(grouped).length === 0 && (
-                <div style={{ ...card, textAlign: 'center', padding: '32px 20px', color: 'rgba(255,255,255,0.3)' }}>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>📅</div>
-                  <div style={{ fontSize: 14 }}>No classes scheduled yet</div>
-                  <div style={{ fontSize: 12, marginTop: 4 }}>Check back soon!</div>
+              {/* Day header */}
+              <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', fontWeight:600, letterSpacing:1, textTransform:'uppercase', marginBottom:12 }}>
+                {headerLabel}
+                <span style={{ fontSize:11, color:'rgba(255,255,255,0.25)', fontWeight:400, marginLeft:8 }}>{daySlots.length} classes</span>
+              </div>
+
+              {/* Class list for selected day */}
+              {daySlots.length === 0 ? (
+                <div style={{ ...card, textAlign:'center', padding:'32px 20px', color:'rgba(255,255,255,0.3)' }}>
+                  <div style={{ fontSize:28, marginBottom:8 }}>😴</div>
+                  <div style={{ fontSize:14 }}>No classes today</div>
+                  <div style={{ fontSize:12, marginTop:4 }}>Tap another day above to check</div>
                 </div>
-              )}
+              ) : daySlots.map(slot => {
+                const col = CLASS_COLORS[slot.class_type] || CLASS_COLORS['CrossFit']
+                const spotsLeft = slot.max_capacity - slot.bookedCount
+                const isFull = spotsLeft <= 0
+                const isBooked = myBookings.has(slot.id)
+                const isLoading = classBookingLoading.has(slot.id)
+                const fillPct = Math.min(100, Math.round((slot.bookedCount/slot.max_capacity)*100))
 
-              {Object.entries(grouped).map(([date, slots]) => (
-                <div key={date} style={{ marginBottom: 20 }}>
-                  {/* Day header */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                    <div style={{
-                      fontSize: 11, fontWeight: 700, letterSpacing: 2,
-                      color: date === today ? accent : 'rgba(255,255,255,0.5)',
-                      background: date === today ? accentDim : 'transparent',
-                      padding: date === today ? '3px 10px' : '3px 0',
-                      borderRadius: 99
-                    }}>{dayLabel(date)}</div>
-                    <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
-                  </div>
-
-                  {/* Class cards */}
-                  {slots.map(slot => {
-                    const col = CLASS_COLORS[slot.class_type] || CLASS_COLORS['CrossFit']
-                    const spotsLeft = slot.max_capacity - slot.bookedCount
-                    const isFull = spotsLeft <= 0
-                    const isBooked = myBookings.has(slot.id)
-                    const isLoading = classBookingLoading.has(slot.id)
-                    const fillPct = Math.min(100, Math.round((slot.bookedCount / slot.max_capacity) * 100))
-
-                    return (
-                      <div key={slot.id} style={{
-                        ...card,
-                        marginBottom: 10,
-                        border: `1px solid ${isBooked ? 'rgba(0,200,120,0.3)' : isFull ? 'rgba(255,255,255,0.06)' : col.border}`,
-                        background: isBooked ? 'rgba(0,200,120,0.05)' : 'rgba(255,255,255,0.03)',
-                        opacity: isFull && !isBooked ? 0.6 : 1
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                          {/* Left: icon + info */}
-                          <div style={{ display: 'flex', gap: 12, flex: 1, minWidth: 0 }}>
-                            <div style={{ width: 44, height: 44, borderRadius: 12, background: col.bg, border: `1.5px solid ${col.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
-                              {CLASS_ICONS[slot.class_type] || '🏋️'}
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
-                                <span style={{ fontSize: 14, fontWeight: 600 }}>{slot.class_name || slot.class_type}</span>
-                                <span style={{ fontSize: 10, color: col.text, background: col.bg, padding: '2px 7px', borderRadius: 99, fontWeight: 600 }}>{slot.class_type}</span>
-                              </div>
-                              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>
-                                🕐 {fmtTime(slot.start_time)} · {slot.duration_mins}min
-                                {slot.location && ` · ${slot.location}`}
-                              </div>
-                              {slot.notes && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginBottom: 6, fontStyle: 'italic' }}>{slot.notes}</div>}
-
-                              {/* Capacity bar */}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <div style={{ flex: 1, height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 99, overflow: 'hidden' }}>
-                                  <div style={{ width: `${fillPct}%`, height: '100%', background: fillPct >= 90 ? '#ff3a00' : fillPct >= 70 ? '#ffb800' : '#00c878', borderRadius: 99 }} />
-                                </div>
-                                <span style={{ fontSize: 10, color: isFull ? '#ff5050' : 'rgba(255,255,255,0.4)', whiteSpace: 'nowrap', fontWeight: isFull ? 600 : 400 }}>
-                                  {isFull ? 'Full' : `${spotsLeft} spot${spotsLeft !== 1 ? 's' : ''} left`}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Book button */}
-                          <button
-                            onClick={() => isBooked ? handleCancelBooking(slot) : handleBookClass(slot)}
-                            disabled={isLoading || (isFull && !isBooked)}
-                            style={{
-                              background: isBooked ? 'rgba(0,200,120,0.15)' : isFull ? 'rgba(255,255,255,0.05)' : accent,
-                              border: `1px solid ${isBooked ? 'rgba(0,200,120,0.4)' : isFull ? 'rgba(255,255,255,0.1)' : 'transparent'}`,
-                              borderRadius: 10, padding: '10px 14px',
-                              color: isBooked ? '#00c878' : isFull ? 'rgba(255,255,255,0.3)' : '#fff',
-                              fontSize: 12, fontWeight: 600, cursor: isFull && !isBooked ? 'not-allowed' : 'pointer',
-                              flexShrink: 0, fontFamily: "'DM Sans'", whiteSpace: 'nowrap'
-                            }}>
-                            {isLoading ? '...' : isBooked ? '✓ Booked' : isFull ? 'Full' : 'Book'}
-                          </button>
+                return (
+                  <div key={slot.id} style={{
+                    ...card, marginBottom:10,
+                    border:`1px solid ${isBooked?'rgba(0,200,120,0.3)':isFull?'rgba(255,255,255,0.06)':col.border}`,
+                    background: isBooked?'rgba(0,200,120,0.05)':'rgba(255,255,255,0.03)',
+                    opacity: isFull&&!isBooked ? 0.55 : 1
+                  }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                      {/* Time column */}
+                      <div style={{ width:48, flexShrink:0, textAlign:'center' }}>
+                        <div style={{ fontFamily:"'Bebas Neue'", fontSize:18, color: isBooked?'#00c878':col.text, letterSpacing:1, lineHeight:1 }}>
+                          {fmtTime(slot.start_time).replace(' AM','').replace(' PM','')}
+                        </div>
+                        <div style={{ fontSize:9, color:'rgba(255,255,255,0.3)', letterSpacing:1 }}>
+                          {slot.start_time>='12:00'?'PM':'AM'}
                         </div>
                       </div>
-                    )
-                  })}
-                </div>
-              ))}
+
+                      {/* Divider */}
+                      <div style={{ width:2, height:44, borderRadius:2, background: isBooked?'rgba(0,200,120,0.4)':col.border, flexShrink:0 }} />
+
+                      {/* Info */}
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:3, flexWrap:'wrap' }}>
+                          <span style={{ fontSize:14, fontWeight:600 }}>{slot.class_name||slot.class_type}</span>
+                          <span style={{ fontSize:10, color:col.text, background:col.bg, padding:'2px 7px', borderRadius:99, fontWeight:600 }}>{slot.class_type}</span>
+                          {isBooked && <span style={{ fontSize:10, color:'#00c878', fontWeight:600 }}>✓ Booked</span>}
+                        </div>
+                        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                          <div style={{ flex:1, height:3, background:'rgba(255,255,255,0.07)', borderRadius:99, overflow:'hidden' }}>
+                            <div style={{ width:`${fillPct}%`, height:'100%', background:fillPct>=90?'#ff3a00':fillPct>=70?'#ffb800':'#00c878', borderRadius:99 }} />
+                          </div>
+                          <span style={{ fontSize:10, color:isFull?'#ff5050':'rgba(255,255,255,0.35)', whiteSpace:'nowrap', fontWeight:isFull?600:400 }}>
+                            {isFull?'Full':`${spotsLeft} left`}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Book button */}
+                      <button onClick={() => isBooked?handleCancelBooking(slot):handleBookClass(slot)}
+                        disabled={isLoading||(isFull&&!isBooked)}
+                        style={{
+                          background: isBooked?'rgba(0,200,120,0.15)':isFull?'rgba(255,255,255,0.04)':accent,
+                          border:`1px solid ${isBooked?'rgba(0,200,120,0.4)':isFull?'rgba(255,255,255,0.08)':'transparent'}`,
+                          borderRadius:10, padding:'9px 14px',
+                          color: isBooked?'#00c878':isFull?'rgba(255,255,255,0.25)':'#fff',
+                          fontSize:12, fontWeight:600, cursor:isFull&&!isBooked?'not-allowed':'pointer',
+                          flexShrink:0, fontFamily:"'DM Sans'"
+                        }}>
+                        {isLoading?'...':isBooked?'✓':isFull?'Full':'Book'}
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
             </>
           )
         })()}
