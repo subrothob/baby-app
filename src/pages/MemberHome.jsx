@@ -122,6 +122,85 @@ function MiniLineChart({ data, color = accent, isTime = false }) {
   return <canvas ref={canvasRef} width={320} height={90} style={{ width: '100%', height: 90 }} />
 }
 
+// ── B.A.B.Y Daily Ring — 3 concentric SVG rings, auto-filled ─────────────────
+function DailyRing({ checkedIn, scoredToday, hasCommit }) {
+  const score = [checkedIn, scoredToday, hasCommit].filter(Boolean).length
+  const rings = [
+    { done: checkedIn,   color: '#ff6400', track: 'rgba(255,100,0,0.12)',  r: 68, label: 'Show Up',  icon: '✅' },
+    { done: scoredToday, color: '#00b4ff', track: 'rgba(0,180,255,0.1)',   r: 52, label: 'Perform',  icon: '🏆' },
+    { done: hasCommit,   color: '#00c878', track: 'rgba(0,200,120,0.1)',   r: 36, label: 'Commit',   icon: '📅' },
+  ]
+  const cx = 84, cy = 84, sw = 11
+
+  // Arc for a circle: full if done, tiny stub if not
+  const arc = (r, pct) => {
+    const circ = 2 * Math.PI * r
+    return pct > 0 ? `${pct * circ} ${circ}` : `2 ${circ}`
+  }
+  // Rotate so arc starts from top (-90°)
+  const rot = (r) => `rotate(-90 ${cx} ${cy})`
+
+  const ringColor = score === 3 ? '#ffc200' : score === 2 ? '#ff6400' : score === 1 ? '#ff9500' : 'rgba(255,255,255,0.15)'
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+      {/* SVG Rings */}
+      <div style={{ position: 'relative', flexShrink: 0 }}>
+        <svg width={168} height={168} style={{ display: 'block' }}>
+          {rings.map(({ done, color, track, r }, i) => {
+            const circ = 2 * Math.PI * r
+            const dash = done ? circ - 2 : 4
+            return (
+              <g key={i}>
+                <circle cx={cx} cy={cy} r={r} fill="none" stroke={track} strokeWidth={sw} />
+                <circle cx={cx} cy={cy} r={r} fill="none"
+                  stroke={done ? color : 'rgba(255,255,255,0.08)'}
+                  strokeWidth={sw}
+                  strokeDasharray={`${dash} ${circ}`}
+                  strokeDashoffset={circ / 4}
+                  strokeLinecap="round"
+                  transform={`rotate(-90 ${cx} ${cy})`}
+                  style={{ transition: 'stroke-dasharray 0.9s cubic-bezier(.4,0,.2,1), stroke 0.5s' }}
+                />
+              </g>
+            )
+          })}
+          {/* Centre score */}
+          <text x={cx} y={cy - 8} textAnchor="middle" fontFamily="'Bebas Neue',sans-serif"
+            fontSize={30} fill={ringColor} letterSpacing={2}>{score}/3</text>
+          <text x={cx} y={cy + 10} textAnchor="middle" fontFamily="'DM Sans',sans-serif"
+            fontSize={10} fill="rgba(255,255,255,0.4)" letterSpacing={3}>TODAY</text>
+          {score === 3 && (
+            <text x={cx} y={cy + 26} textAnchor="middle" fontSize={14}>🏆</text>
+          )}
+        </svg>
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {rings.map(({ done, color, label, icon }, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: 8,
+              background: done ? `${color}22` : 'rgba(255,255,255,0.04)',
+              border: `1.5px solid ${done ? color : 'rgba(255,255,255,0.1)'}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14,
+              transition: 'all 0.4s'
+            }}>{icon}</div>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: done ? '#fff' : 'rgba(255,255,255,0.35)' }}>{label}</div>
+              <div style={{ fontSize: 10, color: done ? color : 'rgba(255,255,255,0.2)' }}>{done ? 'Complete ✓' : 'Not yet'}</div>
+            </div>
+          </div>
+        ))}
+        {score === 3 && (
+          <div style={{ fontSize: 11, color: '#ffc200', fontWeight: 600, letterSpacing: 1 }}>PERFECT DAY! 🔥</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Streak fire bar ───────────────────────────────────────────────────────────
 function StreakBar({ streak, longestStreak }) {
   const fire = streak >= 14 ? '🔥🔥🔥' : streak >= 7 ? '🔥🔥' : '🔥'
@@ -364,6 +443,12 @@ export default function MemberHome() {
   const [classBookingLoading, setClassBookingLoading] = useState(new Set())
   const [selectedClassDate, setSelectedClassDate] = useState(new Date().toISOString().split('T')[0])
 
+  // Body Stats
+  const [bodyStats, setBodyStats] = useState([])
+  const [showBodyForm, setShowBodyForm] = useState(false)
+  const [bodyForm, setBodyForm] = useState({ weight: '', body_fat: '', waist: '', chest: '', arm: '', note: '' })
+  const [savingBody, setSavingBody] = useState(false)
+
   // Notification state
   const [notifStatus, setNotifStatus] = useState('idle')
 
@@ -385,6 +470,7 @@ export default function MemberHome() {
     checkTodayScore(m.id)
     fetchGoals(m.id)
     fetchClasses(m.id)
+    fetchBodyStats(m.id)
   }, [])
 
   useEffect(() => {
@@ -489,6 +575,38 @@ export default function MemberHome() {
     const { data } = await supabase.from('member_goals').select('*')
       .eq('member_id', memberId).order('created_at', { ascending: false })
     if (data) setGoals(data)
+  }
+
+  const fetchBodyStats = async (memberId) => {
+    const { data } = await supabase.from('member_body_stats')
+      .select('*').eq('member_id', memberId)
+      .order('logged_date', { ascending: true }).limit(14)
+    if (data) setBodyStats(data)
+  }
+
+  const saveBodyStats = async () => {
+    if (!member || !bodyForm.weight) { showToast('⚠ Weight is required', 'error'); return }
+    setSavingBody(true)
+    const today = new Date().toISOString().split('T')[0]
+    const payload = {
+      member_id: member.id, member_name: member.full_name,
+      logged_date: today,
+      weight_kg: bodyForm.weight ? parseFloat(bodyForm.weight) : null,
+      body_fat_pct: bodyForm.body_fat ? parseFloat(bodyForm.body_fat) : null,
+      waist_cm: bodyForm.waist ? parseFloat(bodyForm.waist) : null,
+      chest_cm: bodyForm.chest ? parseFloat(bodyForm.chest) : null,
+      arm_cm: bodyForm.arm ? parseFloat(bodyForm.arm) : null,
+      note: bodyForm.note || null
+    }
+    const { error } = await supabase.from('member_body_stats')
+      .upsert([payload], { onConflict: 'member_id,logged_date' })
+    if (!error) {
+      showToast('✅ Stats saved!', 'success')
+      setShowBodyForm(false)
+      setBodyForm({ weight: '', body_fat: '', waist: '', chest: '', arm: '', note: '' })
+      fetchBodyStats(member.id)
+    } else { showToast('Could not save. Try again.', 'error') }
+    setSavingBody(false)
   }
 
   const fetchClasses = async (memberId) => {
@@ -766,19 +884,41 @@ export default function MemberHome() {
               </div>
             )}
 
-            {/* Check-in card */}
-            <div style={{ ...card, marginBottom: 14, background: checkedIn ? 'rgba(0,200,100,0.08)' : accentDim, border: `1px solid ${checkedIn ? 'rgba(0,200,100,0.25)' : 'rgba(255,100,0,0.3)'}` }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div>
-                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Today's Attendance</div>
-                  <div style={{ fontSize: 18, fontWeight: 600 }}>{checkedIn ? "✅ You're checked in!" : 'Ready to train?'}</div>
-                  {!checkedIn && <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>Tap to mark your attendance</div>}
-                </div>
-                <button onClick={handleCheckIn} disabled={checkedIn || checkingIn}
-                  style={{ background: checkedIn ? 'rgba(0,200,100,0.2)' : accent, border: 'none', borderRadius: 12, padding: '12px 18px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: checkedIn ? 'default' : 'pointer', opacity: checkingIn ? 0.6 : 1 }}>
-                  {checkedIn ? '🔥 Done' : checkingIn ? '...' : 'Check In'}
+            {/* ── B.A.B.Y Daily Ring ── */}
+            <div style={{ ...card, marginBottom: 14, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden', position: 'relative' }}>
+              {/* Glow behind ring */}
+              {[checkedIn, scoredToday, myBookings.size > 0].filter(Boolean).length === 3 && (
+                <div style={{ position:'absolute', top:-40, left:'50%', transform:'translateX(-50%)', width:200, height:200, background:'radial-gradient(circle, rgba(255,194,0,0.12) 0%, transparent 70%)', pointerEvents:'none' }} />
+              )}
+              <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 14 }}>TODAY'S RING</div>
+              <DailyRing
+                checkedIn={checkedIn}
+                scoredToday={scoredToday}
+                hasCommit={myBookings.size > 0}
+              />
+              {/* Check-in button below ring */}
+              {!checkedIn && (
+                <button onClick={handleCheckIn} disabled={checkingIn}
+                  style={{ width:'100%', marginTop:16, background: accent, border:'none', borderRadius:12, padding:'13px', color:'#fff', fontSize:14, fontWeight:600, cursor:'pointer', fontFamily:"'DM Sans'" }}>
+                  {checkingIn ? '...' : '✅ Check In — Fill the Ring'}
                 </button>
-              </div>
+              )}
+              {checkedIn && (
+                <div style={{ marginTop:14, display:'flex', gap:8 }}>
+                  {!scoredToday && (
+                    <button onClick={() => navigate('/log-result')}
+                      style={{ flex:1, background:'rgba(0,180,255,0.1)', border:'1px solid rgba(0,180,255,0.3)', borderRadius:10, padding:'10px', color:'#00b4ff', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:"'DM Sans'" }}>
+                      🏆 Log Result
+                    </button>
+                  )}
+                  {myBookings.size === 0 && (
+                    <button onClick={() => setTab('classes')}
+                      style={{ flex:1, background:'rgba(0,200,120,0.1)', border:'1px solid rgba(0,200,120,0.3)', borderRadius:10, padding:'10px', color:'#00c878', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:"'DM Sans'" }}>
+                      📅 Book a Class
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* WOD preview */}
@@ -964,6 +1104,104 @@ export default function MemberHome() {
         {tab === 'progress' && (
           <div>
             <div style={{ fontSize: 11, color: accent, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 600, marginBottom: 14 }}>Progress Tracker 📈</div>
+
+            {/* ── BODY STATS SECTION ── */}
+            {(() => {
+              const latest = bodyStats[bodyStats.length - 1]
+              const prev = bodyStats.length > 1 ? bodyStats[bodyStats.length - 2] : null
+              const weightDiff = latest && prev ? (latest.weight_kg - prev.weight_kg).toFixed(1) : null
+              const weightData = bodyStats.filter(s => s.weight_kg).map(s => ({ value: String(s.weight_kg), value_numeric: s.weight_kg, label: s.logged_date }))
+
+              const inStyle = { background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:10, padding:'11px 12px', color:'#fff', fontSize:13, fontFamily:"'DM Sans'", width:'100%', outline:'none', colorScheme:'dark', boxSizing:'border-box' }
+
+              return (
+                <div style={{ ...card, marginBottom: 16, border:'1px solid rgba(255,100,0,0.2)', background:'rgba(255,100,0,0.03)' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+                    <div style={{ fontSize:11, color:accent, letterSpacing:2, textTransform:'uppercase', fontWeight:600 }}>Body Stats 📏</div>
+                    <button onClick={() => setShowBodyForm(v => !v)}
+                      style={{ background: showBodyForm?'rgba(255,255,255,0.06)':accent, border:'none', borderRadius:8, padding:'6px 14px', color:'#fff', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:"'DM Sans'" }}>
+                      {showBodyForm ? 'Cancel' : '+ Log Stats'}
+                    </button>
+                  </div>
+
+                  {/* Log form */}
+                  {showBodyForm && (
+                    <div style={{ marginBottom:14 }}>
+                      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
+                        {[
+                          { key:'weight', label:'Weight (kg)', ph:'e.g. 82.5' },
+                          { key:'body_fat', label:'Body Fat (%)', ph:'e.g. 18.5' },
+                          { key:'waist', label:'Waist (cm)', ph:'e.g. 86' },
+                          { key:'chest', label:'Chest (cm)', ph:'e.g. 98' },
+                          { key:'arm', label:'Arm (cm)', ph:'e.g. 34' },
+                        ].map(({ key, label, ph }) => (
+                          <div key={key}>
+                            <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)', letterSpacing:1, textTransform:'uppercase', marginBottom:4 }}>{label}</div>
+                            <input type="number" step="0.1" placeholder={ph} value={bodyForm[key]}
+                              onChange={e => setBodyForm(f => ({ ...f, [key]: e.target.value }))}
+                              style={inStyle} />
+                          </div>
+                        ))}
+                        <div>
+                          <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)', letterSpacing:1, textTransform:'uppercase', marginBottom:4 }}>Note (optional)</div>
+                          <input placeholder="e.g. Morning, fasted" value={bodyForm.note}
+                            onChange={e => setBodyForm(f => ({ ...f, note: e.target.value }))}
+                            style={inStyle} />
+                        </div>
+                      </div>
+                      <button onClick={saveBodyStats} disabled={savingBody}
+                        style={{ width:'100%', background:accent, border:'none', borderRadius:10, padding:'12px', color:'#fff', fontSize:13, fontWeight:600, cursor:'pointer', fontFamily:"'DM Sans'" }}>
+                        {savingBody ? 'Saving...' : '💾 Save Today\'s Stats'}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Latest stats summary */}
+                  {latest ? (
+                    <>
+                      <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:12 }}>
+                        {[
+                          { label:'Weight', val: latest.weight_kg ? `${latest.weight_kg} kg` : '–', diff: weightDiff, color: weightDiff < 0 ? '#00c878' : weightDiff > 0 ? '#ff5050' : null },
+                          { label:'Body Fat', val: latest.body_fat_pct ? `${latest.body_fat_pct}%` : '–', color: null },
+                          { label:'Waist', val: latest.waist_cm ? `${latest.waist_cm}cm` : '–', color: null },
+                          { label:'Chest', val: latest.chest_cm ? `${latest.chest_cm}cm` : '–', color: null },
+                          { label:'Arm', val: latest.arm_cm ? `${latest.arm_cm}cm` : '–', color: null },
+                        ].map(({ label, val, diff, color }) => (
+                          <div key={label} style={{ flex:'1 1 30%', background:'rgba(255,255,255,0.04)', borderRadius:10, padding:'10px 12px', minWidth:0 }}>
+                            <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', letterSpacing:1, textTransform:'uppercase', marginBottom:3 }}>{label}</div>
+                            <div style={{ fontSize:16, fontWeight:700, color: color || '#fff' }}>{val}</div>
+                            {diff && <div style={{ fontSize:10, color: diff < 0 ? '#00c878' : '#ff5050', marginTop:2 }}>{diff > 0 ? '+' : ''}{diff} kg</div>}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Weight trend chart */}
+                      {weightData.length >= 2 && (
+                        <div>
+                          <div style={{ fontSize:10, color:'rgba(255,255,255,0.3)', letterSpacing:1, textTransform:'uppercase', marginBottom:6 }}>Weight Trend ({weightData.length} entries)</div>
+                          <MiniLineChart data={weightData} color="#ff6400" />
+                          <div style={{ display:'flex', justifyContent:'space-between', marginTop:4 }}>
+                            <span style={{ fontSize:10, color:'rgba(255,255,255,0.25)' }}>{weightData[0]?.label}</span>
+                            <span style={{ fontSize:10, color:'rgba(255,255,255,0.25)' }}>{weightData[weightData.length-1]?.label}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{ fontSize:10, color:'rgba(255,255,255,0.25)', marginTop:8 }}>
+                        Last logged: {new Date(latest.logged_date+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}
+                        {latest.note && ` · ${latest.note}`}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ textAlign:'center', padding:'20px 0', color:'rgba(255,255,255,0.3)' }}>
+                      <div style={{ fontSize:28, marginBottom:6 }}>📏</div>
+                      <div style={{ fontSize:13 }}>No stats logged yet</div>
+                      <div style={{ fontSize:11, marginTop:4 }}>Log your first entry to start tracking</div>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             {/* Category filter — wrapped grid, all visible */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
