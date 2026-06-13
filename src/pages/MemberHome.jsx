@@ -578,10 +578,9 @@ export default function MemberHome() {
   }
 
   const fetchBodyStats = async (memberId) => {
-    const { data, error } = await supabase.from('member_body_stats')
+    const { data } = await supabase.from('member_body_stats')
       .select('*').eq('member_id', memberId)
       .order('logged_date', { ascending: true }).limit(14)
-    console.log('[bodyStats] memberId:', memberId, 'data:', data, 'error:', error)
     if (data) setBodyStats(data)
   }
 
